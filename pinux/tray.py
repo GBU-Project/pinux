@@ -197,14 +197,14 @@ class StatusNotifierItemService(dbus.service.Object):
                 "Id": dbus.String("pinux"),
                 "Title": dbus.String("Pinux"),
                 "Status": dbus.String("Active"),
-                "IconName": dbus.String("accessories-dictionary-symbolic"),
+                "IconName": dbus.String("pinux"),
                 "IconThemePath": dbus.String(""),
                 "ItemIsMenu": dbus.Boolean(False),
                 "Menu": dbus.ObjectPath(self._menu_path),
                 "WindowId": dbus.Int32(0),
                 "ToolTip": dbus.Struct(
                     (
-                        dbus.String("accessories-dictionary-symbolic"),
+                        dbus.String("pinux"),
                         dbus.Array([], signature="(iiay)"),
                         dbus.String("Pinux Translator"),
                         dbus.String("Klik kanan untuk menu pengaturan / OCR"),

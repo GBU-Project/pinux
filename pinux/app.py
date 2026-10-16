@@ -351,6 +351,12 @@ class PinuxApp(Adw.Application):
         if self._owns_text_capturer:
             self._init_clipboard_backend()
 
+        # Set default window icon ke icon 'pinux'
+        try:
+            Gtk.Window.set_default_icon_name("pinux")
+        except Exception:
+            pass
+
         # Daftarkan aksi aplikasi Gio
         self._add_action("trigger-translate", lambda *_: self.trigger_router.request_translate())
         self._add_action("trigger-ocr", lambda *_: self.trigger_router.request_ocr())
@@ -369,6 +375,10 @@ class PinuxApp(Adw.Application):
 
         # Pasang watch pada berkas konfigurasi (R9.4)
         self.config_store.watch(self._on_config_changed)
+
+        # Menjaga proses background/daemon tetap hidup walau tanpa jendela menetap
+        self.hold()
+
 
     def _init_clipboard_backend(self) -> None:
         """Pasang backend clipboard GDK setelah Gtk/Adw diinisialisasi."""
@@ -389,8 +399,8 @@ class PinuxApp(Adw.Application):
 
     def do_activate(self) -> None:
         """Dipanggil saat instans utama berjalan tanpa opsi."""
-        # Menjaga proses tetap hidup di latar belakang
-        self.hold()
+        self.show_settings_window()
+
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
         options = command_line.get_options_dict()
