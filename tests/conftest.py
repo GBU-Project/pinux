@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from pinux.configstore import ConfigStore
 
 
 class FakeClipboard:
@@ -61,6 +64,16 @@ def tmp_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
 def fake_clipboard() -> FakeClipboard:
     """Kembalikan clipboard palsu berisi teks awal kosong."""
     return FakeClipboard()
+
+
+@pytest.fixture
+def config_store(tmp_config_dir: Path) -> Iterator["ConfigStore"]:
+    """Kembalikan ConfigStore yang menunjuk direktori pengaturan sementara."""
+    from pinux.configstore import ConfigStore
+
+    store = ConfigStore(tmp_config_dir / "pinux" / "pinux.toml")
+    yield store
+    store.close()
 
 
 def set_xdg_dirs(

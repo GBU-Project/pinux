@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Pinux
+Comment=Aplikasi penerjemah desktop GTK4 untuk Linux
+Exec=pinux
+Icon=pinux
+Terminal=false
+Type=Application
+Categories=Utility;Translation;
+X-GNOME-Autostart-enabled=true

@@ -23,18 +23,18 @@ Dokumen ini membedakan dengan tegas apa yang sudah ada di repositori dan apa yan
 | Token pembatalan | Sudah ada | `pinux/scheduler.py` |
 | Model pengaturan | Sudah ada | `pinux/config.py` |
 | Uji unit lapisan model | Sudah ada, 25 uji lulus | `tests/test_models.py` |
-| Pemuatan dan penulisan berkas TOML | Belum ada, task 4 | rencana di `pinux/configstore.py` |
-| Penyimpanan kredensial | Belum ada, task 5 | rencana di `pinux/credentials.py` |
-| Provider `google-free` | Belum ada, task 6 | rencana di `pinux/translate/google_free.py` |
-| Registri provider | Belum ada, task 7 | rencana di `pinux/translate/registry.py` |
-| Penjadwal permintaan | Belum ada, task 8 | rencana di `pinux/scheduler.py` |
-| Penangkapan teks dari Clipboard | Belum ada, task 10 | rencana di `pinux/capture/` |
-| Klien portal GlobalShortcuts | Belum ada, task 11 | rencana di `pinux/portal/shortcuts.py` |
-| Klien portal Screenshot | Belum ada, task 12 | rencana di `pinux/portal/screenshot.py` |
-| Pekerja dan klien OCR | Belum ada, task 13 | rencana di `pinux/ocr/` |
-| Popup, overlay area, tray, pengaturan | Belum ada, task 15-18 | rencana di `pinux/ui/`, `pinux/tray.py` |
-| Perakitan aplikasi dan CLI | Belum ada, task 19 | rencana di `pinux/app.py` |
-| Integrasi desktop | Belum ada, task 20 | rencana di `data/` |
+| Pemuatan dan penulisan berkas TOML | Sudah ada, task 4 | `pinux/configstore.py`, `tests/test_configstore.py` |
+| Penyimpanan kredensial | Sudah ada, task 5 | `pinux/credentials.py`, `tests/test_credentials.py` |
+| Provider `google-free` | Sudah ada, task 6 | `pinux/translate/google_free.py`, `tests/test_google_free.py` |
+| Registri provider | Sudah ada, task 7 | `pinux/translate/registry.py`, `tests/test_registry.py`, `examples/deepl_provider.py` |
+| Penjadwal permintaan | Sudah ada, task 8 | `pinux/scheduler.py`, `tests/test_scheduler.py` |
+| Penangkapan teks dari Clipboard | Sudah ada, task 10 | `pinux/capture/capturer.py`, `tests/test_capture.py` |
+| Klien portal GlobalShortcuts | Sudah ada, task 11 | `pinux/portal/shortcuts.py`, `tests/test_portals.py` |
+| Klien portal Screenshot | Sudah ada, task 12 | `pinux/portal/screenshot.py`, `tests/test_portals.py` |
+| Pekerja dan klien OCR | Sudah ada, task 13 | `pinux/ocr/client.py`, `pinux/ocr/worker.py`, `tests/test_ocr.py` |
+| Popup, overlay area, tray, pengaturan | Sudah ada, task 15-18 | `pinux/ui/`, `pinux/tray.py`, `tests/test_popup.py`, `tests/test_region.py`, `tests/test_tray.py`, `tests/test_settings_ui.py` |
+| Perakitan aplikasi dan CLI | Sudah ada, task 19 | `pinux/app.py`, `pinux/__main__.py`, `tests/test_app.py` |
+| Integrasi desktop | Sudah ada, task 20 | `data/pinux.desktop`, `data/pinux-autostart.desktop`, `data/icons/pinux.svg` |
 
 ## Tumpukan Teknologi
 

@@ -9,6 +9,23 @@ Perujuk: R2.1, R2.2 pada requirements.md.
 
 from __future__ import annotations
 
-from pinux.capture.base import CaptureResult
+from pinux.capture.base import CaptureOrigin, CaptureResult
+from pinux.capture.capturer import (
+    ClipboardBackend,
+    DesktopSessionType,
+    GdkClipboardBackend,
+    TextCapturer,
+    detect_desktop_session,
+    truncate_text,
+)
 
-__all__ = ["CaptureResult"]
+__all__ = [
+    "CaptureOrigin",
+    "CaptureResult",
+    "ClipboardBackend",
+    "DesktopSessionType",
+    "GdkClipboardBackend",
+    "TextCapturer",
+    "detect_desktop_session",
+    "truncate_text",
+]

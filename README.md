@@ -33,6 +33,27 @@ python3 -m pip --python .venv/bin/python3 install pytest hypothesis
 .venv/bin/python3 -m pytest
 ```
 
+## Menjalankan dan Antarmuka Baris Perintah (CLI)
+
+Pinux dapat dijalankan langsung:
+
+```bash
+pinux
+```
+
+Bila portal GlobalShortcuts tidak tersedia pada lingkungan desktop Anda, Anda dapat mengikat pintasan keyboard secara manual pada Pengaturan Keyboard desktop (GNOME Settings -> Keyboard Shortcuts):
+
+- **Penerjemahan Clipboard:** `pinux --trigger` (rekomendasi pintasan: `Ctrl+Alt+T`)
+- **Tangkapan Layar & OCR:** `pinux --pick-region` (rekomendasi pintasan: `Ctrl+Alt+O`)
+- **Buka Jendela Pengaturan:** `pinux --settings`
+
+## Terjemah seleksi (ala Bob)
+
+Sorot teks di aplikasi mana pun, lalu tekan pintasan terjemahan. Pinux membaca
+seleksi (primary selection) lebih dulu; bila Anda baru saja menyalin dengan
+Ctrl+C, isi clipboard yang dipakai. Pada Wayland, pasang `wl-clipboard`
+(`sudo apt install wl-clipboard`) agar seleksi dapat dibaca dari aplikasi lain.
+
 ## Dokumentasi
 
 - `.monkeycode/specs/linux-translator/requirements.md` — kebutuhan fungsional
