@@ -40,21 +40,15 @@ def test_property_8_tray_failure_is_non_fatal() -> None:
 
 
 def test_tray_item_menu_events() -> None:
-    settings_called = False
-    ocr_called = False
-    quit_called = False
-
-    def on_settings() -> None:
-        nonlocal settings_called
-        settings_called = True
-
-    def on_ocr() -> None:
-        nonlocal ocr_called
-        ocr_called = True
-
-    def on_quit() -> None:
-        nonlocal quit_called
-        quit_called = True
+    events_called: dict[str, bool] = {
+        "translate_selection": False,
+        "ocr_translate": False,
+        "input_translate": False,
+        "show_popup": False,
+        "ocr_pure": False,
+        "settings": False,
+        "quit": False,
+    }
 
     from pinux.tray import DbusMenuService
 
@@ -62,22 +56,40 @@ def test_tray_item_menu_events() -> None:
     service = DbusMenuService(
         bus=mock_bus,
         object_path="/MenuBar",
-        on_settings=on_settings,
-        on_ocr=on_ocr,
-        on_quit=on_quit,
+        on_translate_selection=lambda: events_called.__setitem__("translate_selection", True),
+        on_ocr_translate=lambda: events_called.__setitem__("ocr_translate", True),
+        on_input_translate=lambda: events_called.__setitem__("input_translate", True),
+        on_show_popup=lambda: events_called.__setitem__("show_popup", True),
+        on_ocr_pure=lambda: events_called.__setitem__("ocr_pure", True),
+        on_settings=lambda: events_called.__setitem__("settings", True),
+        on_quit=lambda: events_called.__setitem__("quit", True),
+        version_string="Pinux v0.1.0",
     )
 
     # Uji GetLayout
     revision, root = service.GetLayout(0, 1)
     assert revision == 1
-    assert len(root[2]) == 3
+    # 11 item (termasuk separator dan versi info)
+    assert len(root[2]) == 11
 
-    # Uji klik event
+    # Uji seluruh event klik
     service.Event(1, "clicked", None, 0)
-    assert settings_called is True
+    assert events_called["translate_selection"] is True
 
     service.Event(2, "clicked", None, 0)
-    assert ocr_called is True
+    assert events_called["ocr_translate"] is True
 
     service.Event(3, "clicked", None, 0)
-    assert quit_called is True
+    assert events_called["input_translate"] is True
+
+    service.Event(4, "clicked", None, 0)
+    assert events_called["show_popup"] is True
+
+    service.Event(6, "clicked", None, 0)
+    assert events_called["ocr_pure"] is True
+
+    service.Event(8, "clicked", None, 0)
+    assert events_called["settings"] is True
+
+    service.Event(11, "clicked", None, 0)
+    assert events_called["quit"] is True

@@ -66,7 +66,7 @@ Dokumen ini membedakan dengan tegas apa yang sudah ada di repositori dan apa yan
 ## Struktur Proyek
 
 ```
-MonkeyCode/
+Pinux/
 ├── pinux/                    # Paket aplikasi
 │   ├── __init__.py           # Versi paket
 │   ├── __main__.py           # Titik masuk perintah `pinux`
@@ -84,7 +84,7 @@ MonkeyCode/
 ├── tests/                    # Pengujian
 │   ├── conftest.py           # Fixture bersama dan clipboard palsu
 │   └── test_models.py        # Uji unit lapisan model
-├── .monkeycode/
+├── docs/
 │   ├── docs/                 # Dokumentasi ini
 │   └── specs/linux-translator/
 │       ├── requirements.md   # Kebutuhan fungsional, format EARS

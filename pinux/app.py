@@ -80,6 +80,63 @@ class TriggerRouter:
             popup.show_loading()
             popup._spinner.set_visible(False)
 
+    def request_input_translate(self) -> None:
+        """Buka jendela popup kosong yang siap untuk input manual pengguna."""
+        popup = self.app.get_popup_window()
+        popup.set_source_text("")
+        popup.show_loading()
+        popup._spinner.set_visible(False)
+        popup.present_at_cursor(0, 0)
+
+    def show_popup_window(self) -> None:
+        """Tampilkan jendela popup yang sedang ada."""
+        popup = self.app.get_popup_window()
+        popup.present_at_cursor(0, 0)
+
+    def request_ocr_pure(self) -> None:
+        """Alur tangkapan layar dan salin teks OCR ke clipboard tanpa menerjemahkan."""
+        overlay = self.app.get_region_overlay()
+        overlay.open(
+            on_selected=self._on_ocr_pure_region_selected,
+            on_cancelled=lambda: logger.info("Seleksi OCR murni dibatalkan pengguna."),
+        )
+
+    def _on_ocr_pure_region_selected(self, rect: Rect) -> None:
+        popup = self.app.get_popup_window()
+        popup.set_source_text("Membaca teks dari gambar...")
+        popup.show_loading()
+        popup.present_at_cursor(0, 0)
+
+        def _bg_pure_ocr() -> None:
+            try:
+                raw_png = self.app.screenshot_portal.capture_fullscreen()
+                cropped_png = crop_image_region(raw_png, rect)
+                ocr_result = self.app.ocr_client.recognize(cropped_png)
+                ocr_text = ocr_result.text.strip()
+
+                if not ocr_text:
+                    GLib.idle_add(lambda: popup.show_error("Tidak ada teks yang terdeteksi pada area gambar."))
+                    return
+
+                max_chars = self.app.settings.max_chars
+                if len(ocr_text) > max_chars:
+                    ocr_text = ocr_text[:max_chars]
+
+                # Salin hasil OCR ke clipboard
+                self.app.text_capturer.send_to_clipboard(ocr_text)
+
+                def _show_copied() -> None:
+                    popup.set_source_text(ocr_text)
+                    popup.show_error("✓ Teks OCR berhasil disalin ke clipboard.")
+
+                GLib.idle_add(_show_copied)
+            except Exception as exc:
+                logger.error(f"Kegagalan alur OCR murni: {exc}")
+                GLib.idle_add(lambda: popup.show_error(f"Galat OCR: {exc}"))
+
+        import threading
+        threading.Thread(target=_bg_pure_ocr, daemon=True).start()
+
     def request_ocr(self) -> None:
         """Alur tangkapan layar dan OCR terjemahan (R6.1, R6.2, R6.3)."""
         overlay = self.app.get_region_overlay()
@@ -240,8 +297,12 @@ class PinuxApp(Adw.Application):
         )
 
         self.tray_item = tray_item or TrayItem(
+            on_translate_selection=self.trigger_router.request_translate,
+            on_ocr_translate=self.trigger_router.request_ocr,
+            on_input_translate=self.trigger_router.request_input_translate,
+            on_show_popup=self.trigger_router.show_popup_window,
+            on_ocr_pure=self.trigger_router.request_ocr_pure,
             on_settings=self.show_settings_window,
-            on_ocr=self.trigger_router.request_ocr,
             on_quit=self.quit_app,
         )
 

@@ -33,28 +33,59 @@ DBUSMENU_INTERFACE: Final[str] = "com.canonical.dbusmenu"
 
 
 class DbusMenuService(dbus.service.Object):
-    """Implementasi sederhana com.canonical.dbusmenu untuk menu tray Pinux."""
+    """Implementasi com.canonical.dbusmenu untuk menu tray Pinux bergaya Bob."""
 
     def __init__(
         self,
         bus: dbus.Bus,
         object_path: str,
+        on_translate_selection: Callable[[], None] | None = None,
+        on_ocr_translate: Callable[[], None] | None = None,
+        on_input_translate: Callable[[], None] | None = None,
+        on_show_popup: Callable[[], None] | None = None,
+        on_ocr_pure: Callable[[], None] | None = None,
         on_settings: Callable[[], None] | None = None,
-        on_ocr: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
+        version_string: str = "Pinux v0.1.0",
     ) -> None:
         super().__init__(bus, object_path)
+        self._on_translate_selection = on_translate_selection
+        self._on_ocr_translate = on_ocr_translate
+        self._on_input_translate = on_input_translate
+        self._on_show_popup = on_show_popup
+        self._on_ocr_pure = on_ocr_pure
         self._on_settings = on_settings
-        self._on_ocr = on_ocr
         self._on_quit = on_quit
+        self._version_string = version_string
 
     @dbus.service.method(DBUSMENU_INTERFACE, in_signature="ii", out_signature="u(ia{sv}av)")
     def GetLayout(self, parent_id: int, recursion_depth: int) -> tuple[int, Any]:
-        """Kembalikan struktur menu bertingkat: root -> [Pengaturan, OCR, Keluar]."""
+        """Kembalikan struktur menu bertingkat ala Bob:
+        - Terjemahkan Seleksi / Clipboard (Ctrl+Alt+T)
+        - Tangkapan Layar & Terjemah (OCR) (Ctrl+Alt+O)
+        - Input Terjemahan Manual
+        - Tampilkan Jendela Terjemahan
+        --- (separator)
+        - Tangkapan Layar & Salin Teks OCR
+        --- (separator)
+        - Pengaturan
+        --- (separator)
+        - Pinux v... (disabled/info)
+        - Keluar
+        """
+        empty_children = dbus.Array([], signature="v")
         items = [
-            (1, {"label": "Pengaturan", "type": "standard", "enabled": True}, []),
-            (2, {"label": "OCR", "type": "standard", "enabled": True}, []),
-            (3, {"label": "Keluar", "type": "standard", "enabled": True}, []),
+            (1, {"label": "Terjemahkan Seleksi / Clipboard", "type": "standard", "enabled": True}, empty_children),
+            (2, {"label": "Tangkapan Layar & Terjemah (OCR)", "type": "standard", "enabled": True}, empty_children),
+            (3, {"label": "Input Terjemahan Manual", "type": "standard", "enabled": True}, empty_children),
+            (4, {"label": "Tampilkan Jendela Terjemahan", "type": "standard", "enabled": True}, empty_children),
+            (5, {"type": "separator"}, empty_children),
+            (6, {"label": "Tangkapan Layar & Salin Teks OCR", "type": "standard", "enabled": True}, empty_children),
+            (7, {"type": "separator"}, empty_children),
+            (8, {"label": "Pengaturan...", "type": "standard", "enabled": True}, empty_children),
+            (9, {"type": "separator"}, empty_children),
+            (10, {"label": self._version_string, "type": "standard", "enabled": False}, empty_children),
+            (11, {"label": "Keluar", "type": "standard", "enabled": True}, empty_children),
         ]
         root = (0, {"children-display": "submenu"}, items)
         return (1, root)
@@ -63,11 +94,19 @@ class DbusMenuService(dbus.service.Object):
     def Event(self, item_id: int, event_id: str, data: Any, timestamp: int) -> None:
         """Tangani klik pada item menu."""
         if event_id == "clicked":
-            if item_id == 1 and self._on_settings is not None:
+            if item_id == 1 and self._on_translate_selection is not None:
+                self._on_translate_selection()
+            elif item_id == 2 and self._on_ocr_translate is not None:
+                self._on_ocr_translate()
+            elif item_id == 3 and self._on_input_translate is not None:
+                self._on_input_translate()
+            elif item_id == 4 and self._on_show_popup is not None:
+                self._on_show_popup()
+            elif item_id == 6 and self._on_ocr_pure is not None:
+                self._on_ocr_pure()
+            elif item_id == 8 and self._on_settings is not None:
                 self._on_settings()
-            elif item_id == 2 and self._on_ocr is not None:
-                self._on_ocr()
-            elif item_id == 3 and self._on_quit is not None:
+            elif item_id == 11 and self._on_quit is not None:
                 self._on_quit()
 
 
@@ -128,14 +167,25 @@ class TrayItem:
     def __init__(
         self,
         bus: dbus.Bus | None = None,
+        on_translate_selection: Callable[[], None] | None = None,
+        on_ocr_translate: Callable[[], None] | None = None,
+        on_input_translate: Callable[[], None] | None = None,
+        on_show_popup: Callable[[], None] | None = None,
+        on_ocr_pure: Callable[[], None] | None = None,
         on_settings: Callable[[], None] | None = None,
-        on_ocr: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
+        on_ocr: Callable[[], None] | None = None,  # Backward compatibility
+        version_string: str = "Pinux v0.1.0",
     ) -> None:
         self._bus = bus
+        self._on_translate_selection = on_translate_selection
+        self._on_ocr_translate = on_ocr_translate or on_ocr
+        self._on_input_translate = on_input_translate
+        self._on_show_popup = on_show_popup
+        self._on_ocr_pure = on_ocr_pure
         self._on_settings = on_settings
-        self._on_ocr = on_ocr
         self._on_quit = on_quit
+        self._version_string = version_string
 
         self._sni_service: StatusNotifierItemService | None = None
         self._menu_service: DbusMenuService | None = None
@@ -178,9 +228,14 @@ class TrayItem:
             self._menu_service = DbusMenuService(
                 bus=bus,
                 object_path=menu_path,
+                on_translate_selection=self._on_translate_selection,
+                on_ocr_translate=self._on_ocr_translate,
+                on_input_translate=self._on_input_translate,
+                on_show_popup=self._on_show_popup,
+                on_ocr_pure=self._on_ocr_pure,
                 on_settings=self._on_settings,
-                on_ocr=self._on_ocr,
                 on_quit=self._on_quit,
+                version_string=self._version_string,
             )
             self._sni_service = StatusNotifierItemService(
                 bus=bus,

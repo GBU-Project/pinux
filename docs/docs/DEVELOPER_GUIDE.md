@@ -68,13 +68,13 @@ Perhatikan bahwa opsi `--python` harus diletakkan sebelum nama subperintah `inst
 
 ## Alur Kerja Pengembangan
 
-Proyek ini memakai alur Spec-Driven Development. Perubahan dikerjakan satu task pada satu waktu, mengikuti urutan pada `.monkeycode/specs/linux-translator/tasklist.md`.
+Proyek ini memakai alur Spec-Driven Development. Perubahan dikerjakan satu task pada satu waktu, mengikuti urutan pada `docs/specs/linux-translator/tasklist.md`.
 
 1. Baca `requirements.md` lalu `design.md` sebelum menulis kode.
 2. Kerjakan satu task beserta sub-task pengujiannya.
 3. Jalankan seluruh pengujian; task tidak boleh ditandai selesai bila ada yang gagal.
 4. Tandai checkbox pada `tasklist.md` dengan `[x]`.
-5. Perbarui dokumentasi pada `.monkeycode/docs/`.
+5. Perbarui dokumentasi pada `docs/docs/`.
 
 ### Perintah pemeriksaan
 
@@ -135,7 +135,7 @@ raise RuntimeError("kuota tercapai")
 1. `pinux/config.py` - tambahkan field beserta nilai bawaan pada dataclass terkait
 2. `pinux/configstore.py` - tambahkan pemetaan kunci TOML dan validasinya (task 4)
 3. `tests/test_models.py` - tambahkan pengujian nilai bawaan
-4. `.monkeycode/docs/INTERFACES.md` - dokumentasikan field baru
+4. `docs/docs/INTERFACES.md` - dokumentasikan field baru
 
 **Langkah:**
 

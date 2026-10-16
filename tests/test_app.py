@@ -81,3 +81,29 @@ def test_pinux_app_singleton_and_options(tmp_path: Path) -> None:
 
     assert app.get_application_id() == "org.pinux.Pinux"
     assert app.get_flags() & Gio.ApplicationFlags.HANDLES_COMMAND_LINE
+
+
+def test_trigger_router_input_translate_and_show() -> None:
+    mock_app = MagicMock()
+    mock_popup = MagicMock()
+    mock_app.get_popup_window.return_value = mock_popup
+
+    router = TriggerRouter(mock_app)
+    router.request_input_translate()
+    mock_popup.set_source_text.assert_called_with("")
+    mock_popup.present_at_cursor.assert_called_with(0, 0)
+
+    mock_popup.reset_mock()
+    router.show_popup_window()
+    mock_popup.present_at_cursor.assert_called_once_with(0, 0)
+
+
+def test_trigger_router_request_ocr_pure() -> None:
+    mock_app = MagicMock()
+    mock_overlay = MagicMock()
+    mock_app.get_region_overlay.return_value = mock_overlay
+
+    router = TriggerRouter(mock_app)
+    router.request_ocr_pure()
+    mock_overlay.open.assert_called_once()
+
