@@ -76,13 +76,15 @@ def test_load_invalid_toml_returns_defaults_with_line_number(
 
 def test_decode_error_position_falls_back_to_message() -> None:
     """Jalur cadangan untuk Python 3.11 sampai 3.13 tanpa atribut lineno."""
-    error = tomllib.TOMLDecodeError("Gagal mengurai (at line 7, column 3)")
+    error = Exception.__new__(tomllib.TOMLDecodeError)
+    Exception.__init__(error, "Gagal mengurai (at line 7, column 3)")
 
     assert _decode_error_position(error) == (7, 3)
 
 
 def test_decode_error_position_without_position_returns_none() -> None:
-    error = tomllib.TOMLDecodeError("Gagal mengurai tanpa posisi")
+    error = Exception.__new__(tomllib.TOMLDecodeError)
+    Exception.__init__(error, "Gagal mengurai tanpa posisi")
 
     assert _decode_error_position(error) == (None, None)
 

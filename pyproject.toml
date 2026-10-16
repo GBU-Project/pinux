@@ -43,3 +43,12 @@ addopts = "-ra --strict-markers"
 markers = [
     "integration: memerlukan sesi desktop nyata dan portal yang tersedia",
 ]
+filterwarnings = [
+    # Peringatan upstream dari gi/events.py saat integrasi GLib dengan asyncio loop di Python 3.14+
+    "ignore:'asyncio\\.AbstractEventLoopPolicy' is deprecated:DeprecationWarning:gi\\.events",
+    "ignore:'asyncio\\.get_event_loop_policy' is deprecated:DeprecationWarning:gi\\.events",
+    # Peringatan upstream PyGObject overrides saat mengimpor gi.repository.GLib
+    "ignore:GLib\\.unix_signal_add_full is deprecated:gi.PyGIDeprecationWarning",
+    # Peringatan libadwaita untuk PreferencesWindow.add
+    "ignore:Adw\\.PreferencesWindow\\.add is deprecated:DeprecationWarning",
+]
