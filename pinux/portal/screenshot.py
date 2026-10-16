@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Final
 
 import dbus
-from gi.repository import GLib
+from pinux.portal.request import portal_request
 
 __all__ = ["ScreenshotPortal"]
 
@@ -81,51 +81,17 @@ class ScreenshotPortal:
             "interactive": dbus.Boolean(False),
         }
 
-        # Response handling via main loop
-        response_code: int | None = None
-        results_dict: dict | None = None
-        loop = GLib.MainLoop()
-
-        def _on_response(res_code: int, results: dict) -> None:
-            nonlocal response_code, results_dict
-            response_code = int(res_code)
-            results_dict = dict(results)
-            loop.quit()
-
-        req_path = iface.Screenshot(dbus.String(parent_window), options)
-        req_obj = bus.get_object(PORTAL_BUS_NAME, req_path)
-        req_iface = dbus.Interface(req_obj, REQUEST_INTERFACE)
-
-        sig_match = bus.add_signal_receiver(
-            _on_response,
-            signal_name="Response",
-            dbus_interface=REQUEST_INTERFACE,
-            path=req_path,
-        )
-
-        # Timeout guard
-        def _on_timeout() -> bool:
-            loop.quit()
-            return False
-
-        timeout_id = GLib.timeout_add(int(timeout_s * 1000), _on_timeout)
-
         try:
-            loop.run()
-        finally:
-            GLib.source_remove(timeout_id)
-            try:
-                bus.remove_signal_receiver(
-                    _on_response,
-                    signal_name="Response",
-                    dbus_interface=REQUEST_INTERFACE,
-                    path=req_path,
-                )
-            except Exception:
-                pass
-
-        if response_code is None:
-            raise TimeoutError(f"Tangkapan layar melebihi batas waktu {timeout_s} detik")
+            response_code, results_dict = portal_request(
+                bus,
+                lambda: iface.Screenshot(dbus.String(parent_window), options),
+                token,
+                timeout_s=timeout_s,
+            )
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Tangkapan layar melebihi batas waktu {timeout_s} detik"
+            ) from exc
 
         if response_code != 0:
             raise RuntimeError(f"Tangkapan layar ditolak pengguna atau gagal (kode: {response_code})")

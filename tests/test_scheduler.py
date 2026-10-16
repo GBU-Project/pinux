@@ -210,33 +210,48 @@ def test_property_4_single_request_exact_one_callback_called() -> None:
         run_glib_loop(0.1)
         scheduler.shutdown(wait=True)
 
-    if not fail:
-        assert len(results) == 1
-        assert len(errors) == 0
-    else:
-        assert len(results) == 0
-        assert len(errors) == 1
+        if not fail:
+            assert len(results) == 1
+            assert len(errors) == 0
+        else:
+            assert len(results) == 0
+            assert len(errors) == 1
 
 
-def test_rapid_resubmit_dispatches_cancelled_error_exactly_once() -> None:
-    """Regression #1: submit baru yang membatalkan request lama tetap
-    menghasilkan tepat satu callback 'cancelled' untuk request lama
-    (bukan hilang senyap karena seq berubah)."""
-    scheduler = RequestScheduler(max_workers=1)
-    provider = MockSlowProvider(delay_s=0.1)
-    results: list[TranslationResult] = []
-    errors: list[TranslationError] = []
-    # Submit A, lalu langsung submit B tanpa menunggu idle GLib
-    scheduler.submit(
-        TranslationRequest("Pertanyaan", None, "en"), provider, None, results.append, errors.append
-    )
-    scheduler.submit(
-        TranslationRequest("Kedua", None, "en"), provider, None, results.append, errors.append
-    )
-    run_glib_loop(0.5)
-    scheduler.shutdown(wait=True)
-    run_glib_loop(0.1)
-    assert len(errors) == 1
-    assert errors[0].kind == "cancelled"
-    assert len(results) == 1
-    assert results[0].text == "Hasil: Kedua"
+def test_superseded_request_does_not_report_cancelled_error() -> None:
+    """Regresi: permintaan lama yang digantikan tidak boleh memunculkan galat
+    'dibatalkan' yang menimpa hasil permintaan terbaru."""
+    import time
+
+    from gi.repository import GLib
+
+    from pinux.translate.base import TranslationRequest, TranslationResult
+
+    class Slow:
+        id = "slow"
+
+        def translate(self, req, cred, cancel):
+            time.sleep(0.3)
+            return TranslationResult(req.text, "en", "slow")
+
+    events: list[tuple] = []
+    scheduler = RequestScheduler()
+    loop = GLib.MainLoop()
+
+    def submit(text: str) -> None:
+        scheduler.submit(
+            TranslationRequest(text, None, "id"),
+            Slow(),
+            None,
+            on_result=lambda r: events.append(("ok", r.text)),
+            on_error=lambda e: events.append(("err", text, e.kind)),
+        )
+
+    submit("A")
+    time.sleep(0.05)
+    submit("B")
+    GLib.timeout_add(900, loop.quit)
+    loop.run()
+    scheduler.shutdown()
+
+    assert events == [("ok", "B")]

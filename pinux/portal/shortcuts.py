@@ -23,12 +23,15 @@ from typing import Final, Literal
 
 import dbus
 
+from pinux.portal.request import portal_request
+
 __all__ = [
     "BoundShortcut",
     "GlobalShortcutsPortal",
     "ShortcutBackend",
     "ShortcutManager",
     "ShortcutSpec",
+    "specs_from_settings",
 ]
 
 logger = logging.getLogger("pinux.portal.shortcuts")
@@ -117,8 +120,12 @@ class GlobalShortcutsPortal:
         except Exception:
             pass
 
-    def create_session(self) -> str | None:
-        """Buat sesi portal GlobalShortcuts (CreateSession)."""
+    def create_session(self, *, timeout_s: float = 15.0) -> str | None:
+        """Buat sesi portal GlobalShortcuts dan kembalikan ``session_handle``.
+
+        ``CreateSession`` bersifat asinkron: handle sesi yang sah hanya ada pada
+        hasil sinyal ``Response``, bukan hasil tebakan path.
+        """
         self._ensure_registered()
 
         bus = self._get_bus()
@@ -132,24 +139,35 @@ class GlobalShortcutsPortal:
         }
 
         try:
-            req_path = iface.CreateSession(options)
-            # Dapatkan path session dari Request atau format standar portal
-            sender_name = bus.get_unique_name().replace(".", "_").lstrip(":")
-            session_path = f"/org/freedesktop/portal/desktop/session/{sender_name}/{token}"
-            self._session_path = session_path
-            return session_path
+            code, results = portal_request(
+                bus,
+                lambda: iface.CreateSession(options),
+                token + "_req",
+                timeout_s=timeout_s,
+            )
         except Exception as exc:
             logger.info(f"Portal GlobalShortcuts tidak dapat membuat sesi: {exc}")
             return None
+
+        handle = results.get("session_handle")
+        if code != 0 or not handle:
+            logger.info(f"CreateSession ditolak atau tanpa handle (kode {code})")
+            return None
+        self._session_path = str(handle)
+        return self._session_path
 
     def bind(
         self,
         shortcuts: Sequence[ShortcutSpec],
         parent_window: str = "",
+        *,
+        timeout_s: float = 120.0,
     ) -> list[BoundShortcut]:
         """Ikat pintasan global pada portal.
 
-        Mengembalikan daftar BoundShortcut yang berhasil diikat.
+        Mengembalikan hanya pintasan yang benar-benar disetujui portal beserta
+        pemicu yang disetujui (bisa berbeda dari ``preferred_trigger``).
+        Daftar kosong berarti ditolak atau gagal.
         """
         if not self.is_available():
             raise RuntimeError("Portal GlobalShortcuts tidak tersedia")
@@ -184,52 +202,37 @@ class GlobalShortcutsPortal:
         options = {"handle_token": dbus.String(token)}
 
         try:
-            # BindShortcuts(session_handle, shortcuts, parent_window, options)
-            iface.BindShortcuts(
-                dbus.ObjectPath(self._session_path),
-                dbus_shortcuts,
-                dbus.String(parent_window),
-                options,
+            code, results = portal_request(
+                bus,
+                lambda: iface.BindShortcuts(
+                    dbus.ObjectPath(self._session_path),
+                    dbus_shortcuts,
+                    dbus.String(parent_window),
+                    options,
+                ),
+                token,
+                timeout_s=timeout_s,
             )
-            # Jika sukses dipanggil tanpa exception:
-            bound: list[BoundShortcut] = []
-            for s in shortcuts:
-                bound.append(
-                    BoundShortcut(
-                        id=s.id,
-                        trigger=s.preferred_trigger,
-                        activation_token=s.id,
-                    )
-                )
-            return bound
         except Exception as exc:
             logger.warning(f"BindShortcuts gagal atau ditolak: {exc}")
             return []
 
-    def configure_shortcuts(self, parent_window: str = "") -> None:
-        """Buka dialog konfigurasi pintasan bawaan sistem desktop (ConfigureShortcuts)."""
-        portal_opened = False
-        if self._session_path:
-            try:
-                bus = self._get_bus()
-                portal = bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
-                iface = dbus.Interface(portal, GLOBAL_SHORTCUTS_INTERFACE)
-                iface.ConfigureShortcuts(
-                    dbus.ObjectPath(self._session_path),
-                    dbus.String(parent_window),
-                    {},
-                )
-                portal_opened = True
-            except Exception as exc:
-                logger.info(f"Portal ConfigureShortcuts tidak didukung/gagal ({exc}), membuka Pengaturan Sistem GNOME.")
+        if code != 0:
+            logger.warning(f"BindShortcuts ditolak pengguna (kode {code})")
+            return []
 
-        if not portal_opened:
-            import subprocess
+        wanted = {s.id: s for s in shortcuts}
+        bound: list[BoundShortcut] = []
+        for item in results.get("shortcuts", []):
             try:
-                subprocess.Popen(["gnome-control-center", "keyboard"])
-            except Exception as exc:
-                logger.warning(f"Gagal membuka gnome-control-center keyboard: {exc}")
-
+                sid, props = str(item[0]), dict(item[1])
+            except (TypeError, IndexError, ValueError):
+                continue
+            if sid not in wanted:
+                continue
+            trigger = str(props.get("trigger_description") or wanted[sid].preferred_trigger)
+            bound.append(BoundShortcut(id=sid, trigger=trigger, activation_token=sid))
+        return bound
 
     def unbind(self, bindings: Sequence[BoundShortcut]) -> None:
         """Lepaskan pintasan atau tutup sesi."""
@@ -256,6 +259,21 @@ class GlobalShortcutsPortal:
             except Exception:
                 pass
             self._session_path = None
+
+
+_SPEC_DESCRIPTIONS: Final[dict[str, str]] = {
+    "translate": "Penerjemahan teks dari Clipboard",
+    "ocr": "Tangkapan layar dan OCR terjemahan",
+}
+
+
+def specs_from_settings(shortcuts: dict[str, str]) -> tuple[ShortcutSpec, ...]:
+    """Susun ShortcutSpec dari ``Settings.shortcuts`` (sintaks GTK)."""
+    return tuple(
+        ShortcutSpec(id=sid, description=_SPEC_DESCRIPTIONS[sid], preferred_trigger=trigger)
+        for sid, trigger in shortcuts.items()
+        if sid in _SPEC_DESCRIPTIONS and trigger
+    )
 
 
 class ShortcutManager:

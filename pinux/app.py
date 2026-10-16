@@ -33,13 +33,13 @@ from pinux.configstore import ConfigStore
 from pinux.credentials import CredentialStore
 from pinux.ocr.client import OcrWorkerClient
 from pinux.portal.screenshot import ScreenshotPortal
-from pinux.portal.shortcuts import ShortcutManager, ShortcutSpec
+from pinux.portal.shortcuts import ShortcutManager, ShortcutSpec, specs_from_settings
 from pinux.scheduler import RequestScheduler
 from pinux.translate.base import TranslationRequest
 from pinux.translate.registry import ProviderRegistry
 from pinux.tray import TrayItem
 from pinux.ui.popup import PopupWindow
-from pinux.ui.region import Rect, RegionOverlay, crop_image_region
+from pinux.ui.region import RegionOverlay
 from pinux.ui.settings import SettingsWindow
 
 __all__ = ["PinuxApp", "TriggerRouter"]
@@ -94,99 +94,82 @@ class TriggerRouter:
         popup = self.app.get_popup_window()
         popup.present_at_cursor(0, 0)
 
-    def request_ocr_pure(self) -> None:
-        """Alur tangkapan layar dan salin teks OCR ke clipboard tanpa menerjemahkan."""
+    def _open_region_picker(self, on_image: Callable[[bytes], None], label: str) -> None:
+        """Ambil tangkapan layar, tampilkan sebagai bingkai beku, lalu pilih area.
+
+        ``on_image`` menerima PNG hasil potongan (sudah dalam piksel citra).
+        """
+        self.app.hide_popup_for_capture()
         overlay = self.app.get_region_overlay()
+
+        def _on_error(exc: Exception) -> None:
+            popup = self.app.get_popup_window()
+            popup.set_source_text("")
+            popup.present_at_cursor(0, 0)
+            popup.show_error(f"Tangkapan layar gagal: {exc}")
+
         overlay.open(
-            on_selected=self._on_ocr_pure_region_selected,
-            on_cancelled=lambda: logger.info("Seleksi OCR murni dibatalkan pengguna."),
+            on_selected=lambda rect: logger.debug("Rect tanpa bingkai beku diabaikan: %s", rect),
+            on_cancelled=lambda: logger.info("Seleksi %s dibatalkan pengguna.", label),
+            screenshot_provider=self.app.screenshot_portal.capture_fullscreen,
+            on_image=on_image,
+            on_error=_on_error,
         )
 
-    def _on_ocr_pure_region_selected(self, rect: Rect) -> None:
+    def _run_ocr_in_background(
+        self,
+        cropped_png: bytes,
+        on_text: Callable[[str], None],
+    ) -> None:
+        """Jalankan OCR pada thread latar; ``on_text`` dipanggil di thread utama."""
         popup = self.app.get_popup_window()
         popup.set_source_text("Membaca teks dari gambar...")
         popup.show_loading()
         popup.present_at_cursor(0, 0)
 
-        def _bg_pure_ocr() -> None:
+        def _bg() -> None:
             try:
-                raw_png = self.app.screenshot_portal.capture_fullscreen()
-                cropped_png = crop_image_region(raw_png, rect)
-                ocr_result = self.app.ocr_client.recognize(cropped_png)
-                ocr_text = ocr_result.text.strip()
-
+                ocr_text = self.app.ocr_client.recognize(cropped_png).text.strip()
                 if not ocr_text:
-                    GLib.idle_add(lambda: popup.show_error("Tidak ada teks yang terdeteksi pada area gambar."))
+                    GLib.idle_add(
+                        lambda: popup.show_error("Tidak ada teks yang terdeteksi pada area gambar.")
+                    )
                     return
-
-                max_chars = self.app.settings.max_chars
-                if len(ocr_text) > max_chars:
-                    ocr_text = ocr_text[:max_chars]
-
-                # Salin hasil OCR ke clipboard
-                self.app.text_capturer.send_to_clipboard(ocr_text)
-
-                def _show_copied() -> None:
-                    popup.set_source_text(ocr_text)
-                    popup.show_error("✓ Teks OCR berhasil disalin ke clipboard.")
-
-                GLib.idle_add(_show_copied)
-            except Exception as exc:
-                logger.error(f"Kegagalan alur OCR murni: {exc}")
-                GLib.idle_add(lambda: popup.show_error(f"Galat OCR: {exc}"))
-
-        import threading
-        threading.Thread(target=_bg_pure_ocr, daemon=True).start()
-
-    def request_ocr(self) -> None:
-        """Alur tangkapan layar dan OCR terjemahan (R6.1, R6.2, R6.3)."""
-        overlay = self.app.get_region_overlay()
-        overlay.open(
-            on_selected=self._on_ocr_region_selected,
-            on_cancelled=lambda: logger.info("Seleksi OCR dibatalkan pengguna."),
-        )
-
-    def _on_ocr_region_selected(self, rect: Rect) -> None:
-        """Dipanggil setelah pengguna selesai memilih area persegi pada overlay."""
-        # 1. Tampilkan popup dengan status memuat
-        popup = self.app.get_popup_window()
-        popup.set_source_text("Membaca teks dari gambar...")
-        popup.show_loading()
-        popup.present_at_cursor(0, 0)
-
-        # 2. Jalankan penangkapan layar dan OCR di background thread
-        def _bg_ocr() -> None:
-            try:
-                # Tangkap layar via ScreenshotPortal
-                raw_png = self.app.screenshot_portal.capture_fullscreen()
-                # Potong citra sesuai rect
-                cropped_png = crop_image_region(raw_png, rect)
-
-                # Jalankan OCR melalui worker
-                ocr_result = self.app.ocr_client.recognize(cropped_png)
-                ocr_text = ocr_result.text.strip()
-
-                if not ocr_text:
-                    GLib.idle_add(lambda: popup.show_error("Tidak ada teks yang terdeteksi pada area gambar."))
-                    return
-
-                # Potong teks bila melebihi max_chars
-                max_chars = self.app.settings.max_chars
-                if len(ocr_text) > max_chars:
-                    ocr_text = ocr_text[:max_chars]
-
-                # Update popup dan jalankan terjemahan
-                def _update_and_translate() -> None:
-                    popup.set_source_text(ocr_text)
-                    self._execute_translation(ocr_text)
-
-                GLib.idle_add(_update_and_translate)
+                ocr_text = ocr_text[: self.app.settings.max_chars]
+                GLib.idle_add(lambda: on_text(ocr_text))
             except Exception as exc:
                 logger.error(f"Kegagalan alur OCR: {exc}")
                 GLib.idle_add(lambda: popup.show_error(f"Galat OCR: {exc}"))
 
         import threading
-        threading.Thread(target=_bg_ocr, daemon=True).start()
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def request_ocr_pure(self) -> None:
+        """Pilih area layar lalu salin teks OCR ke clipboard tanpa menerjemahkan."""
+        self._open_region_picker(self._on_ocr_pure_image, "OCR murni")
+
+    def _on_ocr_pure_image(self, cropped_png: bytes) -> None:
+        popup = self.app.get_popup_window()
+
+        def _copied(text: str) -> None:
+            self.app.text_capturer.send_to_clipboard(text)
+            popup.set_source_text(text)
+            popup.show_error("✓ Teks OCR berhasil disalin ke clipboard.")
+
+        self._run_ocr_in_background(cropped_png, _copied)
+
+    def request_ocr(self) -> None:
+        """Pilih area layar, OCR, lalu terjemahkan (R6.1, R6.2, R6.3)."""
+        self._open_region_picker(self._on_ocr_image, "OCR")
+
+    def _on_ocr_image(self, cropped_png: bytes) -> None:
+        popup = self.app.get_popup_window()
+
+        def _translate(text: str) -> None:
+            popup.set_source_text(text)
+            self._execute_translation(text)
+
+        self._run_ocr_in_background(cropped_png, _translate)
 
     def _execute_translation(
         self,
@@ -300,7 +283,8 @@ class PinuxApp(Adw.Application):
         self.trigger_router = TriggerRouter(self)
 
         self.shortcut_manager = shortcut_manager or ShortcutManager(
-            on_activated=self.trigger_router.on_shortcut_activated
+            specs=specs_from_settings(self.settings.shortcuts) or None,
+            on_activated=self.trigger_router.on_shortcut_activated,
         )
 
         self.tray_item = tray_item or TrayItem(
@@ -382,8 +366,9 @@ class PinuxApp(Adw.Application):
         self._add_action("settings", lambda *_: self.show_settings_window())
         self._add_action("quit", lambda *_: self.quit_app())
 
-        # Mulai ShortcutManager
-        self.shortcut_manager.start()
+        # Mulai ShortcutManager setelah startup selesai: pengikatan portal dapat
+        # menampilkan dialog persetujuan dan menunggu hingga puluhan detik.
+        GLib.idle_add(self._start_shortcuts)
 
         # Tampilkan TrayItem (Properti 8: jika gagal tidak mematikan aplikasi)
         try:
@@ -398,6 +383,13 @@ class PinuxApp(Adw.Application):
         # Menjaga proses background/daemon tetap hidup walau tanpa jendela menetap
         self.hold()
 
+
+    def _start_shortcuts(self) -> bool:
+        try:
+            self.shortcut_manager.start()
+        except Exception as exc:
+            logger.warning(f"ShortcutManager gagal dimulai: {exc}")
+        return False  # sekali jalan
 
     def _init_clipboard_backend(self) -> None:
         """Pasang backend clipboard GDK setelah Gtk/Adw diinisialisasi."""
@@ -496,6 +488,12 @@ class PinuxApp(Adw.Application):
                 target_lang=self.settings.target_language,
             )
 
+
+    def hide_popup_for_capture(self) -> None:
+        """Sembunyikan popup agar tidak ikut tertangkap pada screenshot."""
+        popup = self._popup_window
+        if popup is not None and popup.is_visible():
+            popup.hide()
 
     def get_region_overlay(self) -> RegionOverlay:
         """Dapatkan atau buat RegionOverlay tunggal."""

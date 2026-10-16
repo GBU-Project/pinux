@@ -5,6 +5,7 @@ from pinux.portal.shortcuts import (
     ShortcutBackend,
     ShortcutManager,
     ShortcutSpec,
+    specs_from_settings,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ShortcutBackend",
     "ShortcutManager",
     "ShortcutSpec",
+    "specs_from_settings",
 ]

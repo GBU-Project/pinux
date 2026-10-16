@@ -145,3 +145,17 @@ def test_pinux_app_swap_languages(tmp_path: Path) -> None:
         assert executed_calls[0] == ("Halo dunia", "id", "en")
 
 
+
+
+def test_request_ocr_uses_frozen_frame_picker() -> None:
+    """OCR memakai tangkapan layar lebih dulu (bingkai beku), bukan overlay transparan."""
+    mock_app = MagicMock()
+    mock_overlay = MagicMock()
+    mock_app.get_region_overlay.return_value = mock_overlay
+
+    TriggerRouter(mock_app).request_ocr()
+
+    mock_app.hide_popup_for_capture.assert_called_once()
+    kwargs = mock_overlay.open.call_args.kwargs
+    assert kwargs["screenshot_provider"] is mock_app.screenshot_portal.capture_fullscreen
+    assert callable(kwargs["on_image"]) and callable(kwargs["on_error"])

@@ -165,3 +165,61 @@ def test_screenshot_portal_capture_flow(tmp_path: Path) -> None:
         assert image_bytes == b"\x89PNG\r\n\x1a\nfakeimagebytes"
         # Berkas sementara harus dibersihkan setelah dibaca
         assert not fake_png.exists()
+
+
+# --- Alur asinkron CreateSession / BindShortcuts ------------------------------
+
+
+def _async_portal(responses):
+    """GlobalShortcutsPortal dengan bus palsu; ``responses`` = antrean (kode, hasil)."""
+    from pinux.portal import shortcuts as sc
+
+    bus = MagicMock()
+    bus.get_unique_name.return_value = ":1.7"
+    portal = sc.GlobalShortcutsPortal(bus=bus)
+    portal.is_available = lambda: True
+    portal._ensure_registered = lambda: None
+    queue = list(responses)
+    return sc, portal, queue
+
+
+def test_create_session_uses_handle_from_response() -> None:
+    sc, portal, queue = _async_portal([(0, {"session_handle": "/real/session/handle"})])
+    with patch.object(sc, "portal_request", side_effect=lambda *a, **k: queue.pop(0)), \
+         patch("dbus.Interface"):
+        assert portal.create_session() == "/real/session/handle"
+    assert portal._session_path == "/real/session/handle"
+
+
+def test_bind_returns_only_approved_shortcuts_with_approved_trigger() -> None:
+    sc, portal, queue = _async_portal(
+        [
+            (0, {"session_handle": "/s"}),
+            (0, {"shortcuts": [("translate", {"trigger_description": "Ctrl+Shift+T"})]}),
+        ]
+    )
+    specs = [
+        ShortcutSpec("translate", "T", "<Control><Alt>T"),
+        ShortcutSpec("ocr", "O", "<Control><Alt>O"),
+    ]
+    with patch.object(sc, "portal_request", side_effect=lambda *a, **k: queue.pop(0)), \
+         patch("dbus.Interface"):
+        bound = portal.bind(specs)
+    assert [(b.id, b.trigger) for b in bound] == [("translate", "Ctrl+Shift+T")]
+
+
+def test_bind_rejected_by_user_returns_empty() -> None:
+    sc, portal, queue = _async_portal([(0, {"session_handle": "/s"}), (1, {})])
+    with patch.object(sc, "portal_request", side_effect=lambda *a, **k: queue.pop(0)), \
+         patch("dbus.Interface"):
+        assert portal.bind([ShortcutSpec("translate", "T", "<Control><Alt>T")]) == []
+
+
+def test_specs_from_settings_uses_user_triggers() -> None:
+    from pinux.portal.shortcuts import specs_from_settings
+
+    specs = specs_from_settings({"translate": "<Super>T", "ocr": "<Super>O", "lainnya": "x"})
+    assert {s.id: s.preferred_trigger for s in specs} == {
+        "translate": "<Super>T",
+        "ocr": "<Super>O",
+    }

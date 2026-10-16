@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -19,8 +21,10 @@ from typing import Any
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 from PIL import Image
+
+from pinux.capture.geometry import scale_to_image
 
 __all__ = ["Rect", "RegionOverlay", "crop_image_region"]
 
@@ -76,6 +80,35 @@ def crop_image_region(
     return buf.getvalue()
 
 
+_OVERLAY_CSS = b"""
+window.pinux-region-overlay { background: black; }
+.pinux-selection {
+    border: 2px solid #3399ff;
+    background-color: rgba(51, 153, 255, 0.18);
+}
+"""
+_css_installed = False
+
+
+def _install_overlay_css() -> None:
+    """Pasang CSS overlay satu kali pada display default."""
+    global _css_installed
+    if _css_installed:
+        return
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    provider = Gtk.CssProvider()
+    if hasattr(provider, "load_from_string"):  # GTK 4.12+
+        provider.load_from_string(_OVERLAY_CSS.decode())
+    else:
+        provider.load_from_data(_OVERLAY_CSS)
+    Gtk.StyleContext.add_provider_for_display(
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    _css_installed = True
+
+
 class RegionOverlay(Gtk.Window):
     """Jendela transparan layar penuh untuk memilih Screenshot_Region."""
 
@@ -88,6 +121,18 @@ class RegionOverlay(Gtk.Window):
 
         self._on_selected: Callable[[Rect], None] | None = None
         self._on_cancelled: Callable[[], None] | None = None
+        self._on_image: Callable[[bytes], None] | None = None
+        self._on_error: Callable[[Exception], None] | None = None
+
+        # Mode "bingkai beku": tangkapan layar diambil lebih dulu lalu
+        # ditampilkan sebagai latar, sehingga koordinat seleksi sama persis
+        # dengan piksel citra (tanpa transparansi, offset panel, atau skala).
+        self._shot_png: bytes | None = None
+        self._shot_size: tuple[int, int] = (0, 0)
+        self._picture: Gtk.Picture | None = None
+        self._selection_box: Gtk.Box | None = None
+        self._shot_root: Gtk.Overlay | None = None
+        self._capture_token = 0
 
         self._start_x: float = 0.0
         self._start_y: float = 0.0
@@ -115,14 +160,120 @@ class RegionOverlay(Gtk.Window):
         self,
         on_selected: Callable[[Rect], None],
         on_cancelled: Callable[[], None] | None = None,
+        *,
+        screenshot_provider: Callable[[], bytes] | None = None,
+        on_image: Callable[[bytes], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        capture_delay_s: float = 0.2,
     ) -> None:
-        """Buka jendela overlay dalam keadaan maximized."""
+        """Buka overlay pemilihan area.
+
+        Tanpa ``screenshot_provider``: overlay maximized lama, ``on_selected``
+        menerima ``Rect`` koordinat jendela.
+
+        Dengan ``screenshot_provider``: tangkapan layar diambil dahulu di thread
+        latar (setelah ``capture_delay_s`` agar jendela lain sempat hilang),
+        ditampilkan layar penuh sebagai latar, dan ``on_image`` menerima PNG
+        hasil potongan yang sudah dalam piksel citra.
+        """
         self._on_selected = on_selected
         self._on_cancelled = on_cancelled
+        self._on_image = on_image
+        self._on_error = on_error
         self._is_dragging = False
 
-        self.maximize()
+        if screenshot_provider is None:
+            self._shot_png = None
+            self.maximize()
+            self.present()
+            return
+
+        self._capture_token += 1
+        token = self._capture_token
+
+        def _capture() -> None:
+            try:
+                time.sleep(capture_delay_s)
+                png = screenshot_provider()
+            except Exception as exc:  # galat portal, izin ditolak, dsb.
+                logger.error(f"Tangkapan layar gagal: {exc}")
+                GLib.idle_add(self._capture_failed, token, exc)
+                return
+            GLib.idle_add(self._show_frozen_frame, token, png)
+
+        threading.Thread(target=_capture, daemon=True).start()
+
+    def _capture_failed(self, token: int, exc: Exception) -> bool:
+        if token == self._capture_token and self._on_error is not None:
+            self._on_error(exc)
+        return False
+
+    def _show_frozen_frame(self, token: int, png: bytes) -> bool:
+        if token != self._capture_token:
+            return False  # dibatalkan/digantikan selagi menunggu
+        try:
+            _install_overlay_css()
+            texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(png))
+        except Exception as exc:
+            logger.error(f"Citra tangkapan layar tidak dapat dimuat: {exc}")
+            if self._on_error is not None:
+                self._on_error(exc)
+            return False
+
+        self._shot_png = png
+        self._shot_size = (texture.get_width(), texture.get_height())
+
+        picture = Gtk.Picture.new_for_paintable(texture)
+        picture.set_content_fit(Gtk.ContentFit.FILL)
+        picture.set_can_shrink(True)
+
+        box = Gtk.Box()
+        box.add_css_class("pinux-selection")
+        box.set_visible(False)
+        fixed = Gtk.Fixed()
+        fixed.put(box, 0, 0)
+
+        root = Gtk.Overlay()
+        root.set_child(picture)
+        root.add_overlay(fixed)
+        self._picture, self._selection_box, self._shot_root = picture, box, root
+        self._fixed = fixed
+
+        self.set_child(root)
+        self.fullscreen()
         self.present()
+        return False
+
+    def _finish_frozen_selection(self, rect: "Rect") -> None:
+        """Ubah ``rect`` (koordinat widget) ke piksel citra, potong, kirim."""
+        assert self._shot_png is not None and self._picture is not None
+        try:
+            scaled = Rect(
+                *scale_to_image(
+                    (rect.x, rect.y, rect.width, rect.height),
+                    (self._picture.get_width(), self._picture.get_height()),
+                    self._shot_size,
+                )
+            )
+            cropped = crop_image_region(self._shot_png, scaled)
+        except Exception as exc:
+            logger.error(f"Pemotongan citra gagal: {exc}")
+            if self._on_error is not None:
+                self._on_error(exc)
+            return
+        if self._on_image is not None:
+            self._on_image(cropped)
+
+    def _update_selection_box(self) -> None:
+        if self._selection_box is None:
+            return
+        rect = self._current_rect()
+        if not (self._is_dragging and rect.is_valid):
+            self._selection_box.set_visible(False)
+            return
+        self._fixed.move(self._selection_box, rect.x, rect.y)
+        self._selection_box.set_size_request(int(rect.width), int(rect.height))
+        self._selection_box.set_visible(True)
 
     def _draw_func(
         self,
@@ -165,16 +316,26 @@ class RegionOverlay(Gtk.Window):
         self._current_y = start_y
         self._is_dragging = True
         self._drawing_area.queue_draw()
+        self._update_selection_box()
 
     def _on_drag_update(self, gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
         self._current_x = self._start_x + offset_x
         self._current_y = self._start_y + offset_y
         self._drawing_area.queue_draw()
+        self._update_selection_box()
 
     def _on_drag_end(self, gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
         self._is_dragging = False
         rect = self._current_rect()
+        self._update_selection_box()
         self.hide()
+
+        if self._shot_png is not None:
+            if rect.is_valid:
+                self._finish_frozen_selection(rect)
+            elif self._on_cancelled is not None:
+                self._on_cancelled()
+            return
 
         if rect.is_valid and self._on_selected is not None:
             self._on_selected(rect)
@@ -189,6 +350,7 @@ class RegionOverlay(Gtk.Window):
         state: Gdk.ModifierType,
     ) -> bool:
         if keyval == Gdk.KEY_Escape:
+            self._capture_token += 1  # batalkan tangkapan yang masih berjalan
             self.hide()
             if self._on_cancelled is not None:
                 self._on_cancelled()
