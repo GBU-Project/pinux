@@ -82,6 +82,16 @@ class PopupWindow(Gtk.Window):
         if hasattr(self, "_pin_button"):
             self._pin_button.set_active(self._pinned)
 
+    @property
+    def source_text(self) -> str:
+        """Teks input sumber saat ini."""
+        return self._entry.get_text()
+
+    @property
+    def result_text(self) -> str:
+        """Teks hasil terjemahan saat ini."""
+        return self._current_result_text
+
     def _build_ui(self) -> None:
         """Bangun hierarki widget popup."""
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)

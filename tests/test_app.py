@@ -107,3 +107,41 @@ def test_trigger_router_request_ocr_pure() -> None:
     router.request_ocr_pure()
     mock_overlay.open.assert_called_once()
 
+
+def test_pinux_app_swap_languages(tmp_path: Path) -> None:
+    cfg = ConfigStore(tmp_path / "pinux.toml")
+    creds = CredentialStore(tmp_path / "creds.toml", force_fallback=True)
+
+    app = PinuxApp(
+        config_store=cfg,
+        credential_store=creds,
+        shortcut_manager=MagicMock(),
+        tray_item=MagicMock(),
+    )
+    app.settings.target_language = "id"
+    app.settings.fallback_language = "en"
+
+    mock_popup = MagicMock()
+    mock_popup.result_text = "Halo dunia"
+    mock_popup.source_text = "Hello world"
+    app._popup_window = mock_popup
+
+    with pytest.MonkeyPatch.context() as mp:
+        executed_calls: list[tuple[str, str | None, str | None]] = []
+
+        def mock_exec(t: str, source_lang: str | None = None, target_lang: str | None = None) -> None:
+            executed_calls.append((t, source_lang, target_lang))
+
+        mp.setattr(app.trigger_router, "_execute_translation", mock_exec)
+
+        app._on_swap_languages()
+
+        # Bahasa target dan fallback bertukar
+        assert app.settings.target_language == "en"
+        assert app.settings.fallback_language == "id"
+        # Hasil terjemahan dipasang ke popup dan diterjemahkan kembali
+        mock_popup.set_source_text.assert_called_once_with("Halo dunia")
+        assert len(executed_calls) == 1
+        assert executed_calls[0] == ("Halo dunia", "id", "en")
+
+

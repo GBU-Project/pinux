@@ -187,7 +187,12 @@ class TriggerRouter:
         import threading
         threading.Thread(target=_bg_ocr, daemon=True).start()
 
-    def _execute_translation(self, text: str) -> None:
+    def _execute_translation(
+        self,
+        text: str,
+        source_lang: str | None = None,
+        target_lang: str | None = None,
+    ) -> None:
         """Kirim permintaan penerjemahan ke RequestScheduler."""
         popup = self.app.get_popup_window()
         popup.show_loading()
@@ -207,10 +212,11 @@ class TriggerRouter:
             return
 
         # Atur target bahasa (tangani auto dan fallback jika source sama dengan target - R4.4)
-        target_lang = settings.target_language
+        if target_lang is None:
+            target_lang = settings.target_language
         req = TranslationRequest(
             text=text,
-            source_lang=None,
+            source_lang=source_lang,
             target_lang=target_lang,
         )
 
@@ -430,7 +436,33 @@ class PinuxApp(Adw.Application):
         return self._popup_window
 
     def _on_swap_languages(self) -> None:
-        pass
+        """Tukar bahasa sumber & target dan terjemahkan kembali hasil terjemahan jika ada."""
+        if self._popup_window is None:
+            return
+
+        result_text = self._popup_window.result_text.strip()
+        source_text = self._popup_window.source_text.strip()
+
+        # Tukar target_language dan fallback_language pada settings runtime
+        curr_target = self.settings.target_language
+        curr_fallback = self.settings.fallback_language
+        self.settings.target_language = curr_fallback
+        self.settings.fallback_language = curr_target
+
+        if result_text:
+            # Jika ada hasil terjemahan, jadikan hasil sebagai teks baru di entry
+            self._popup_window.set_source_text(result_text)
+            self.trigger_router._execute_translation(
+                result_text,
+                source_lang=curr_target,
+                target_lang=curr_fallback,
+            )
+        elif source_text:
+            self.trigger_router._execute_translation(
+                source_text,
+                target_lang=self.settings.target_language,
+            )
+
 
     def get_region_overlay(self) -> RegionOverlay:
         """Dapatkan atau buat RegionOverlay tunggal."""
