@@ -32,6 +32,22 @@ SNI_INTERFACE: Final[str] = "org.kde.StatusNotifierItem"
 DBUSMENU_INTERFACE: Final[str] = "com.canonical.dbusmenu"
 
 
+def _make_dbus_dict(d: dict[str, Any]) -> dbus.Dictionary:
+    """Konversi dictionary Python ke dbus.Dictionary bersignature 'sv'."""
+    res = dbus.Dictionary(signature="sv")
+    for k, v in d.items():
+        key = dbus.String(str(k))
+        if isinstance(v, bool):
+            res[key] = dbus.Boolean(v)
+        elif isinstance(v, int):
+            res[key] = dbus.Int32(v)
+        elif isinstance(v, str):
+            res[key] = dbus.String(v)
+        else:
+            res[key] = v
+    return res
+
+
 class DbusMenuService(dbus.service.Object):
     """Implementasi com.canonical.dbusmenu untuk menu tray Pinux bergaya Bob."""
 
@@ -58,42 +74,76 @@ class DbusMenuService(dbus.service.Object):
         self._on_quit = on_quit
         self._version_string = version_string
 
-    @dbus.service.method(DBUSMENU_INTERFACE, in_signature="ii", out_signature="u(ia{sv}av)")
-    def GetLayout(self, parent_id: int, recursion_depth: int) -> tuple[int, Any]:
-        """Kembalikan struktur menu bertingkat ala Bob:
-        - Terjemahkan Seleksi / Clipboard (Ctrl+Alt+T)
-        - Tangkapan Layar & Terjemah (OCR) (Ctrl+Alt+O)
-        - Input Terjemahan Manual
-        - Tampilkan Jendela Terjemahan
-        --- (separator)
-        - Tangkapan Layar & Salin Teks OCR
-        --- (separator)
-        - Pengaturan
-        --- (separator)
-        - Pinux v... (disabled/info)
-        - Keluar
-        """
-        empty_children = dbus.Array([], signature="v")
-        items = [
-            (1, {"label": "Terjemahkan Seleksi / Clipboard", "type": "standard", "enabled": True}, empty_children),
-            (2, {"label": "Tangkapan Layar & Terjemah (OCR)", "type": "standard", "enabled": True}, empty_children),
-            (3, {"label": "Input Terjemahan Manual", "type": "standard", "enabled": True}, empty_children),
-            (4, {"label": "Tampilkan Jendela Terjemahan", "type": "standard", "enabled": True}, empty_children),
-            (5, {"type": "separator"}, empty_children),
-            (6, {"label": "Tangkapan Layar & Salin Teks OCR", "type": "standard", "enabled": True}, empty_children),
-            (7, {"type": "separator"}, empty_children),
-            (8, {"label": "Pengaturan...", "type": "standard", "enabled": True}, empty_children),
-            (9, {"type": "separator"}, empty_children),
-            (10, {"label": self._version_string, "type": "standard", "enabled": False}, empty_children),
-            (11, {"label": "Keluar", "type": "standard", "enabled": True}, empty_children),
+    def _get_raw_menu_items(self) -> list[tuple[int, dict[str, Any]]]:
+        return [
+            (1, {"label": "Terjemahkan Seleksi / Clipboard", "type": "standard", "enabled": True}),
+            (2, {"label": "Tangkapan Layar & Terjemah (OCR)", "type": "standard", "enabled": True}),
+            (3, {"label": "Input Terjemahan Manual", "type": "standard", "enabled": True}),
+            (4, {"label": "Tampilkan Jendela Terjemahan", "type": "standard", "enabled": True}),
+            (5, {"type": "separator"}),
+            (6, {"label": "Tangkapan Layar & Salin Teks OCR", "type": "standard", "enabled": True}),
+            (7, {"type": "separator"}),
+            (8, {"label": "Pengaturan...", "type": "standard", "enabled": True}),
+            (9, {"type": "separator"}),
+            (10, {"label": self._version_string, "type": "standard", "enabled": False}),
+            (11, {"label": "Keluar", "type": "standard", "enabled": True}),
         ]
-        root = (0, {"children-display": "submenu"}, items)
-        return (1, root)
+
+    @dbus.service.method(DBUSMENU_INTERFACE, in_signature="iias", out_signature="u(ia{sv}av)")
+    def GetLayout(
+        self,
+        parent_id: int,
+        recursion_depth: int,
+        property_names: list[str] | None = None,
+    ) -> tuple[int, Any]:
+        """Kembalikan struktur menu bertingkat ala Bob."""
+        empty_children = dbus.Array([], signature="v")
+        raw_items = self._get_raw_menu_items()
+
+        children = dbus.Array(
+            [
+                dbus.Struct(
+                    (
+                        dbus.Int32(item_id),
+                        _make_dbus_dict(props),
+                        empty_children,
+                    ),
+                    signature="(ia{sv}av)",
+                    variant_level=1,
+                )
+                for item_id, props in raw_items
+            ],
+            signature="v",
+        )
+
+        root_props = _make_dbus_dict({"children-display": "submenu"})
+        root = dbus.Struct((dbus.Int32(0), root_props, children), signature="(ia{sv}av)")
+        return (dbus.UInt32(1), root)
+
+    @dbus.service.method(DBUSMENU_INTERFACE, in_signature="aias", out_signature="a(ia{sv})")
+    def GetGroupProperties(
+        self,
+        ids: list[int],
+        property_names: list[str],
+    ) -> list[tuple[int, dict[str, Any]]]:
+        """Kembalikan properti untuk sejumlah item id."""
+        id_set = set(ids)
+        items_dict = dict(self._get_raw_menu_items())
+        result: list[tuple[int, dict[str, Any]]] = []
+        for item_id in ids:
+            if item_id in items_dict:
+                result.append((dbus.Int32(item_id), _make_dbus_dict(items_dict[item_id])))
+        return result
+
+    @dbus.service.method(DBUSMENU_INTERFACE, in_signature="i", out_signature="b")
+    def AboutToShow(self, item_id: int) -> bool:
+        """Dipanggil sebelum menu ditampilkan."""
+        return False
 
     @dbus.service.method(DBUSMENU_INTERFACE, in_signature="isvu", out_signature="")
     def Event(self, item_id: int, event_id: str, data: Any, timestamp: int) -> None:
         """Tangani klik pada item menu."""
-        if event_id == "clicked":
+        if event_id in ("clicked", "activate"):
             if item_id == 1 and self._on_translate_selection is not None:
                 self._on_translate_selection()
             elif item_id == 2 and self._on_ocr_translate is not None:
@@ -108,6 +158,7 @@ class DbusMenuService(dbus.service.Object):
                 self._on_settings()
             elif item_id == 11 and self._on_quit is not None:
                 self._on_quit()
+
 
 
 class StatusNotifierItemService(dbus.service.Object):
@@ -154,11 +205,31 @@ class StatusNotifierItemService(dbus.service.Object):
 
     @dbus.service.method(SNI_INTERFACE, in_signature="ii", out_signature="")
     def ContextMenu(self, x: int, y: int) -> None:
+        """Dipanggil saat klik kanan jika host tidak memakai com.canonical.dbusmenu langsung."""
         pass
 
     @dbus.service.method(SNI_INTERFACE, in_signature="ii", out_signature="")
     def Activate(self, x: int, y: int) -> None:
+        """Dipanggil saat ikon tray diklik kiri."""
         pass
+
+    @dbus.service.method(SNI_INTERFACE, in_signature="ii", out_signature="")
+    def SecondaryActivate(self, x: int, y: int) -> None:
+        """Dipanggil saat ikon tray diklik tengah."""
+        pass
+
+    @dbus.service.signal(SNI_INTERFACE)
+    def NewTitle(self) -> None:
+        pass
+
+    @dbus.service.signal(SNI_INTERFACE)
+    def NewIcon(self) -> None:
+        pass
+
+    @dbus.service.signal(SNI_INTERFACE)
+    def NewStatus(self, status: str) -> None:
+        pass
+
 
 
 class TrayItem:
