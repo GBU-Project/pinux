@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinux"
+version = "0.1.0"
+description = "Aplikasi penerjemah desktop GTK4 untuk Linux dengan popup dan OCR tangkapan layar"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# PyGObject sengaja tetap didaftarkan meskipun umumnya disediakan paket distro.
+# Pada pengembangan, pasang paket ini dengan `pip install -e . --no-deps` agar
+# PyGObject dari sistem dipakai apa adanya.
+dependencies = [
+    "PyGObject>=3.42",
+    "dbus-python>=1.3.2",
+    "Pillow>=10",
+]
+
+[project.optional-dependencies]
+# Tumpukan OCR dipisahkan dari dependensi inti sesuai R7.5, sehingga Pinux
+# tetap berjalan ketika paket OCR tidak terpasang.
+ocr = [
+    "rapidocr-onnxruntime>=1.4",
+    "onnxruntime>=1.17",
+]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6",
+]
+
+[project.scripts]
+pinux = "pinux.__main__:main"
+pinux-ocr-worker = "pinux.ocr.worker:main"
+
+[tool.setuptools.packages.find]
+include = ["pinux*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: memerlukan sesi desktop nyata dan portal yang tersedia",
+]

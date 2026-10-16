@@ -1,0 +1,8 @@
+{
+  "permission_rules": [
+    {
+      "tool": "Bash(unset *)",
+      "decision": "allow"
+    }
+  ]
+}

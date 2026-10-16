@@ -1,0 +1,241 @@
+# Rencana Implementasi Pinux
+
+- [x] 1. Menyiapkan struktur paket dan antarmuka inti
+  - Membuat `pyproject.toml` dengan dependensi inti `PyGObject`, `dbus-python`, `Pillow`, serta extra opsional `ocr` berisi `rapidocr-onnxruntime` dan `onnxruntime`
+  - Membuat struktur paket `pinux/` berisi subpaket `translate/`, `ocr/`, `portal/`, `capture/`, dan `ui/`
+  - Mendaftarkan entry point `pinux = pinux.__main__:main` dan `pinux-ocr-worker = pinux.ocr.worker:main`
+  - Menyiapkan konfigurasi pytest pada `pyproject.toml` beserta dependensi pengembangan `pytest` dan `hypothesis`
+  - Merujuk R3.2, R7.3, R11.5
+
+- [x] 2. Mendefinisikan model data dan Protocol inti
+  - Menulis `pinux/translate/base.py` berisi `Language`, `TranslationRequest`, `TranslationResult`, dan `TranslationError` dengan atribut `kind`
+  - Menulis `pinux/translate/base.py` berisi Protocol `TranslationProvider` dengan operasi `requires_credential`, `list_languages`, dan `translate` sesuai design.md
+  - Menulis `pinux/ocr/base.py` berisi `OcrLine`, `OcrResult`, dan Protocol `OcrEngine` dengan operasi `is_available`, `ensure_model`, dan `recognize`
+  - Menulis `pinux/scheduler.py` berisi `CancelToken`
+  - Menulis `pinux/config.py` berisi dataclass `Settings`, `PopupSettings`, `OcrSettings`, dan `ProviderEntry`
+  - Menulis `pinux/capture.py` berisi dataclass `CaptureResult`
+  - Merujuk R3.2, R7.3, R10.2
+
+- [x] 3. Menyiapkan kerangka pengujian
+  - Membuat `tests/` dengan `conftest.py` berisi fixture `tmp_config_dir` dan fixture clipboard palsu
+  - Membuat utilitas pengujian untuk mengganti `XDG_CONFIG_HOME` dan `XDG_DATA_HOME` ke direktori sementara
+  - Merujuk R9.1, R11.5
+  - [x] 3.1 Menulis uji unit untuk model data dan Protocol
+    - Menguji konstruksi setiap dataclass dan nilai bawaan `Settings`
+    - Menguji `TranslationError.kind` hanya menerima nilai yang didefinisikan pada design.md
+
+- [ ] 4. Mengimplementasikan ConfigStore
+  - Mengimplementasikan pemuatan `$XDG_CONFIG_HOME/pinux/pinux.toml` dengan `tomllib` dan penggabungan nilai bawaan
+  - Mengimplementasikan penulisan atomik melalui berkas sementara dan `os.replace`
+  - Mengimplementasikan penanganan `tomllib.TOMLDecodeError` dengan pengembalian ke nilai bawaan dan peringatan berisi nomor baris
+  - Mengimplementasikan `watch` untuk menerapkan perubahan tanpa menjalankan ulang Pinux
+  - Merujuk R9.1, R9.4, R9.5, R11.5
+  - [ ] 4.1 Menulis uji unit ConfigStore
+    - Menguji pemuatan berkas yang tidak ada menghasilkan nilai bawaan
+    - Menguji TOML tidak valid menghasilkan nilai bawaan beserta nomor baris yang benar
+    - Menguji penulisan gagal tidak merusak berkas sebelumnya
+  - [ ] 4.2 Menulis uji properti untuk Properti 10 (pengaturan atomik)
+    - Membangkitkan objek `Settings` acak, menyimpan, lalu memuat kembali dan memastikan kesetaraan
+    - Merujuk Properti 10 pada design.md
+
+- [ ] 5. Mengimplementasikan CredentialStore
+  - Mengimplementasikan penyimpanan melalui `gi.repository.Secret` dengan skema `{"provider": provider_id}` dan atribut `pinux-provider`
+  - Mengimplementasikan deteksi ketidaktersediaan Secret Service melalui kepemilikan nama `org.freedesktop.secrets`
+  - Mengimplementasikan fallback berkas `$XDG_DATA_HOME/pinux/credentials.toml` dengan izin `0600` beserta penanda peringatan untuk antarmuka pengaturan
+  - Merujuk R9.2, R9.3
+  - [ ] 5.1 Menulis uji unit CredentialStore
+    - Menguji pemilihan backend saat Secret Service tersedia dan tidak tersedia
+    - Menguji izin berkas fallback bernilai `0600`
+  - [ ] 5.2 Menulis uji properti untuk Properti 6 (kredensial tidak bocor)
+    - Membangkitkan Credential acak, menyimpan pengaturan, dan memastikan `pinux.toml` tidak memuat nilai Credential
+    - Merujuk Properti 6 pada design.md
+
+- [ ] 6. Mengimplementasikan TranslationProvider `google-free`
+  - Mengimplementasikan penyusunan URL dan parameter untuk endpoint `translate.googleapis.com/translate_a/single`
+  - Mengimplementasikan pemanggilan HTTP melalui `urllib.request` dengan masa tunggu dari `Settings.request_timeout_s`
+  - Mengimplementasikan penguraian respons menjadi `TranslationResult` beserta Source_Language terdeteksi
+  - Mengimplementasikan pemetaan galat jaringan, batas waktu, batas laju, dan status HTTP menjadi `TranslationError` dengan `kind` yang sesuai
+  - Mengimplementasikan pemeriksaan `CancelToken` di antara tahap permintaan
+  - Mengimplementasikan `list_languages` berisi sekurang-kurangnya `id`, `en`, `ja`, `zh`, dan `ar`
+  - Merujuk R3.1, R4.1, R4.4, R10.1, R10.2, R10.3
+  - [ ] 6.1 Menulis uji unit provider `google-free`
+    - Menguji penyusunan URL untuk teks dan pasangan bahasa yang berbeda
+    - Menguji penguraian respons dengan `urllib.request.urlopen` yang dipalsukan
+    - Menguji pemetaan setiap kode status HTTP galat dan galat jaringan ke `TranslationError.kind`
+  - [ ] 6.2 Menulis uji properti untuk pemetaan galat provider
+    - Membangkitkan kegagalan jaringan dan status HTTP acak serta memastikan operasi `translate` menghasilkan `TranslationError` dan bukan pengecualian lain
+
+- [ ] 7. Mengimplementasikan ProviderRegistry dan contoh Keyed_Provider
+  - Mengimplementasikan pendaftaran provider bawaan `google-free`
+  - Mengimplementasikan pemuatan provider dari entri `[[providers]]` pada `pinux.toml` dengan format `module:ClassName`
+  - Mengimplementasikan pemuatan provider dari entry point grup `pinux.providers`
+  - Mengimplementasikan isolasi kegagalan impor sehingga kegagalan satu modul dicatat dan provider lain tetap dimuat
+  - Mengimplementasikan `get` dan `all` beserta status ketersediaan provider menurut hasil `requires_credential` dan keberadaan Credential
+  - Membuat `examples/deepl_provider.py` berisi implementasi `TranslationProvider` berbasis Credential sebagai acuan
+  - Merujuk R3.3, R3.4, R3.7, R3.8
+  - [ ] 7.1 Menulis uji unit ProviderRegistry
+    - Menguji kegagalan impor modul provider tidak menghentikan pemuatan provider lain
+    - Menguji pemilihan provider menurut pengaturan
+    - Menguji Keyed_Provider tanpa Credential ditandai tidak tersedia
+  - [ ] 7.2 Menulis uji properti untuk Properti 9 (pemuatan provider terisolasi)
+    - Membangkitkan kombinasi modul provider valid dan tidak valid serta memastikan himpunan provider yang dimuat selalu memuat seluruh modul valid
+    - Merujuk Properti 9 pada design.md
+
+- [ ] 8. Mengimplementasikan RequestScheduler
+  - Mengimplementasikan penjadwalan pada `ThreadPoolExecutor` dengan pengalihan hasil dan galat ke thread utama melalui `GLib.idle_add`
+  - Mengimplementasikan pembatalan permintaan aktif ketika permintaan baru diajukan
+  - Mengimplementasikan batas waktu permintaan berdasarkan `Settings.request_timeout_s`
+  - Mengimplementasikan `on_result` dan `on_error` sebagai satu-satunya jalur penyelesaian agar tidak ada keadaan memuat yang tersisa
+  - Merujuk R10.2, R10.4
+  - [ ] 8.1 Menulis uji unit RequestScheduler
+    - Menguji permintaan baru membatalkan permintaan sebelumnya
+    - Menguji permintaan yang melewati batas waktu menghasilkan `TranslationError` dengan `kind` bernilai `timeout`
+    - Menguji tidak ada operasi jaringan yang berjalan pada thread utama
+  - [ ] 8.2 Menulis uji properti untuk Properti 3 (permintaan terbaru menang)
+    - Membangkitkan urutan permintaan dengan durasi penyelesaian acak serta memastikan hasil akhir berasal dari permintaan dengan nomor urut tertinggi yang belum dibatalkan
+    - Merujuk Properti 3 pada design.md
+  - [ ] 8.3 Menulis uji properti untuk Properti 4 (tidak ada keadaan memuat yang tersisa)
+    - Membangkitkan urutan permintaan yang sebagian gagal serta memastikan pada setiap permintaan tepat satu dari `on_result` atau `on_error` dipanggil
+    - Merujuk Properti 4 pada design.md
+
+- [ ] 9. Checkpoint - Memastikan seluruh pengujian inti lulus
+  - Memastikan seluruh uji unit dan uji properti pada tahap inti lulus
+  - Memastikan pengaturan, kredensial, provider, dan penjadwalan berfungsi tanpa sesi grafis
+  - Memastikan seluruh pengujian lulus, jika ada keraguan tanyakan kepada pengguna
+
+- [ ] 10. Mengimplementasikan TextCapturer
+  - Mengimplementasikan deteksi `Desktop_Session` bernilai `wayland` atau `x11`
+  - Mengimplementasikan pembacaan Clipboard melalui `Gdk.Clipboard` dengan `read_text_async`
+  - Mengimplementasikan pembacaan `Gdk.Display.get_primary_clipboard()` pada sesi X11 dan pemakaiannya ketika isinya berbeda dari Clipboard
+  - Mengimplementasikan pemantauan perubahan Clipboard melalui sinyal `changed` pada `GdkClipboard`
+  - Mengimplementasikan pemotongan teks pada `Settings.max_chars` beserta penandaan `CaptureResult.truncated`
+  - Mengimplementasikan `send_to_clipboard` untuk aksi salin
+  - Menyediakan abstraksi pembacaan Clipboard agar dapat digantikan pada pengujian
+  - Merujuk R2.1, R2.2, R2.3, R2.5, R5.4
+  - [ ] 10.1 Menulis uji unit TextCapturer
+    - Menguji pemilihan sumber teks menurut `Desktop_Session`
+    - Menguji Clipboard yang berubah memicu pemanggilan callback dengan teks baru
+    - Menguji Clipboard kosong menghasilkan Source_Text kosong tanpa galat
+  - [ ] 10.2 Menulis uji properti untuk Properti 5 (panjang Source_Text tidak melebihi batas)
+    - Membangkitkan teks dengan panjang acak serta memastikan `len(text) <= max_chars` dan `truncated` bernilai benar jika dan hanya jika pemotongan terjadi
+    - Merujuk Properti 5 pada design.md
+
+- [ ] 11. Mengimplementasikan GlobalShortcutsPortal dan ShortcutManager
+  - Mengimplementasikan `CreateSession` beserta penanganan `session_handle` untuk portal GlobalShortcuts
+  - Mengimplementasikan `BindShortcuts` untuk pintasan `translate` dan `ocr` berdasarkan `Settings.shortcuts`
+  - Mengimplementasikan pembacaan sinyal `Activated` beserta pencocokan `activation_token` ke aksi pemicu
+  - Mengimplementasikan penutupan sesi pada shutdown
+  - Mengimplementasikan `ShortcutManager` yang memilih backend `portal` atau `cli` menurut ketersediaan nama D-Bus
+  - Mengimplementasikan penanganan penolakan pengikatan oleh pengguna dengan peralihan ke mode CLI
+  - Merujuk R1.2, R1.3, R8.1, R8.3, R8.4
+
+- [ ] 12. Mengimplementasikan ScreenshotPortal
+  - Mengimplementasikan pemanggilan `org.freedesktop.portal.Screenshot.Screenshot` dengan opsi `interactive` bernilai `false` dan `handle_token` unik
+  - Mengimplementasikan pengambilan berkas PNG melalui URI `file://` hasil sinyal `Response` beserta pembersihan berkas sementara
+  - Mengimplementasikan pemeriksaan ketersediaan portal
+  - Merujuk R6.2, R6.5
+
+- [ ] 13. Mengimplementasikan tumpukan OCR
+  - Mengimplementasikan `pinux/ocr/protocol.py` berisi pengodean dan penguraian pesan JSON per baris sesuai tabel protokol pada design.md
+  - Mengimplementasikan `pinux/ocr/worker.py` sebagai proses pekerja dengan operasi `ensure_model` dan `recognize` beserta pelaporan `progress`
+  - Mengimplementasikan `RapidOcrEngine` yang membungkus `rapidocr` beserta laporan kemajuan unduhan model
+  - Mengimplementasikan `OcrWorkerClient` dengan penjalanan proses secara lazy, penghentian setelah 5 menit tanpa aktivitas, pemeriksaan ketersediaan tanpa mengimpor `onnxruntime` pada proses utama, dan pembatalan melalui `SIGTERM` beserta penjalanan ulang
+  - Mengimplementasikan ketersediaan `OcrEngine` yang dipengaruhi keberadaan paket OCR tanpa menghentikan proses utama
+  - Merujuk R7.1, R7.2, R7.3, R7.4, R7.5, R6.5
+  - [ ] 13.1 Menulis uji unit protokol pekerja OCR
+    - Menguji pengodean dan penguraian setiap jenis pesan pada tabel protokol
+    - Menguji pesan galat worker dipetakan menjadi galat bertipe benar pada klien
+    - Menguji proses pekerja dijalankan ulang setelah kegagalan
+  - [ ] 13.2 Menulis uji properti untuk Properti 7 (inti bebas dependensi OCR)
+    - Memblokir impor `onnxruntime` dan `rapidocr`, lalu memastikan impor `pinux.app`, `pinux.translate`, dan `pinux.config` berhasil
+    - Merujuk Properti 7 pada design.md
+
+- [ ] 14. Checkpoint - Memastikan seluruh layanan lulus pengujian
+  - Memastikan seluruh uji unit dan uji properti pada tahap layanan lulus
+  - Memastikan Pinux tetap berjalan ketika paket OCR tidak terpasang
+  - Memastikan seluruh pengujian lulus, jika ada keraguan tanyakan kepada pengguna
+
+- [ ] 15. Mengimplementasikan PopupWindow
+  - Membangun `PopupWindow` tanpa dekorasi dengan `Gtk.Entry`, `Gtk.Label`, `Gtk.Spinner`, dan tombol salin, tukar bahasa, pin, serta OCR
+  - Mengimplementasikan `present_at_cursor` yang menempatkan jendela 16 piksel dari posisi kursor
+  - Mengimplementasikan penempatan ulang jendela yang sudah ada tanpa membuat jendela baru
+  - Mengimplementasikan `show_loading`, `show_result`, dan `show_error` beserta penghentian indikator kemajuan pada kedua jalur
+  - Mengimplementasikan `notify::is-active` untuk menutup jendela ketika kehilangan fokus dan Pinned_State tidak aktif
+  - Mengimplementasikan aksi pin, tombol `Escape`, aksi salin hasil, dan penyuntingan Source_Text yang memicu penerjemahan baru
+  - Mengimplementasikan aksi tukar bahasa dan aksi OCR dari dalam popup
+  - Merujuk R1.4, R1.5, R2.4, R4.3, R5.1, R5.2, R5.3, R5.4, R5.5, R5.6
+  - [ ] 15.1 Menulis uji unit mesin keadaan PopupWindow
+    - Menguji kehilangan fokus menutup jendela ketika Pinned_State tidak aktif dan mempertahankan jendela ketika Pinned_State aktif
+    - Menguji urutan pemanggilan `show_result` dan `show_error` selalu menghentikan indikator kemajuan
+    - Merujuk Properti 4 pada design.md
+
+- [ ] 16. Mengimplementasikan RegionOverlay
+  - Mengimplementasikan jendela tanpa dekorasi yang dimaksimalkan pada monitor tempat kursor berada beserta penggambaran persegi pilihan melalui `Gtk.DrawingArea`
+  - Mengimplementasikan interaksi seret untuk memilih area dan tombol `Escape` untuk membatalkan
+  - Mengimplementasikan penghentian seleksi yang menyembunyikan overlay, memanggil `ScreenshotPortal.capture_fullscreen`, lalu memotong citra memakai Pillow
+  - Mengimplementasikan konversi koordinat logis ke piksel berdasarkan `Gdk.Surface.get_scale_factor` beserta penanganan penskalaan fraksional
+  - Mengimplementasikan penanganan kegagalan pemotongan ketika area pilihan berada di luar cakupan citra
+  - Merujuk R6.1, R6.2, R6.3, R6.6
+
+- [ ] 17. Mengimplementasikan TrayItem
+  - Mengimplementasikan pendaftaran nama `org.kde.StatusNotifierItem-<pid>-1` beserta objek `/StatusNotifierItem`
+  - Mengimplementasikan properti `Category`, `Id`, `Title`, `Status`, `IconName`, dan `Menu`
+  - Mengimplementasikan objek `com.canonical.dbusmenu` dengan entri Pengaturan, OCR, dan Keluar
+  - Mengimplementasikan pemanggilan `RegisterStatusNotifierItem` pada `org.kde.StatusNotifierWatcher` beserta penanganan ketidaktersediaan watcher
+  - Merujuk R8.2, R8.5
+  - [ ] 17.1 Menulis uji unit kegagalan TrayItem
+    - Menguji kegagalan pendaftaran tidak menghentikan proses dan tidak melepaskan Global_Shortcut
+    - Merujuk Properti 8 pada design.md
+
+- [ ] 18. Mengimplementasikan SettingsWindow
+  - Membangun `Adw.PreferencesWindow` dengan halaman Umum, Provider, Pintasan, dan OCR
+  - Mengimplementasikan pemilihan Target_Language, bahasa cadangan, batas karakter, dan perilaku pin bawaan pada halaman Umum
+  - Mengimplementasikan daftar Translation_Provider beserta pemilihan provider aktif dan kolom Credential bagi Keyed_Provider
+  - Mengimplementasikan halaman Pintasan yang menampilkan hasil pengikatan portal atau perintah CLI yang perlu diikat manual
+  - Mengimplementasikan halaman OCR berisi status ketersediaan `OcrEngine`, tombol unduh model, dan indikator kemajuan unduhan
+  - Mengimplementasikan penerapan perubahan pengaturan tanpa menjalankan ulang Pinux
+  - Mengimplementasikan keterangan pada sesi Wayland bahwa penangkapan teks bersumber dari Clipboard
+  - Mengimplementasikan peringatan penurunan keamanan berkas kredensial dan peringatan pengaturan tidak valid
+  - Merujuk R3.4, R3.7, R6.5, R7.4, R9.3, R9.4, R9.5, R11.6
+
+- [ ] 19. Mengimplementasikan PinuxApp, TriggerRouter, dan antarmuka baris perintah
+  - Mengimplementasikan `PinuxApp` sebagai `Adw.Application` dengan penanganan siklus hidup `do_startup`, `do_activate`, dan `do_shutdown`
+  - Mengimplementasikan aksi `trigger-translate`, `trigger-ocr`, `settings`, dan `quit` beserta opsi `--trigger`, `--pick-region`, dan `--settings`
+  - Mengimplementasikan pemakaian kembali instans tunggal beserta pengalihan aksi dari instans kedua melalui D-Bus
+  - Mengimplementasikan `TriggerRouter` yang menyatukan sinyal portal, aksi baris perintah, menu tray, dan tombol pengaturan
+  - Mengimplementasikan urutan alur terjemahan lengkap dari pemicu sampai penampilan hasil
+  - Mengimplementasikan urutan alur OCR lengkap dari pemicu sampai penampilan hasil terjemahan
+  - Mengimplementasikan pelepasan Global_Shortcut dan penghentian proses pekerja OCR pada shutdown
+  - Mengimplementasikan pemuatan awal yang tetap berjalan ketika Tray_Icon gagal ditampilkan
+  - Merujuk R1.1, R1.6, R6.3, R8.1, R8.3, R8.4, R10.1
+
+- [ ] 20. Menyiapkan integrasi desktop
+  - Membuat berkas `pinux.desktop` berisi `Exec=pinux`, `Icon=pinux`, dan `Categories=Utility;`
+  - Membuat berkas `pinux-autostart.desktop` untuk direktori autostart
+  - Menyediakan ikon aplikasi pada direktori ikon tema
+  - Mendokumentasikan perintah `pinux --trigger` dan `pinux --pick-region` untuk pengikatan pintasan manual pada berkas `README.md`
+  - Merujuk R1.3, R1.6, R8.1
+
+- [ ] 21. Menulis uji integrasi portal
+  - Merujuk spike 1 sampai spike 6 pada design.md
+  - [ ] 21.1 Menulis uji integrasi GlobalShortcuts
+    - Menguji pengikatan, penerimaan sinyal `Activated`, dan pelepasan shortcut pada sesi nyata
+    - Melewati pengujian dengan penanda `skip` ketika portal tidak tersedia
+    - Merujuk R1.2
+  - [ ] 21.2 Menulis uji integrasi Screenshot dan pemotongan area
+    - Menguji hasil tangkapan penuh berupa PNG valid dan pemotongan pada penskalaan 100% serta 200%
+    - Merujuk R6.2 dan spike 1 serta spike 2 pada design.md
+  - [ ] 21.3 Menulis uji integrasi Secret Service
+    - Menguji penyimpanan, pembacaan, dan penghapusan Credential melalui sesi nyata
+    - Melewati pengujian dengan penanda `skip` ketika `org.freedesktop.secrets` tidak memiliki pemilik
+    - Merujuk R9.2
+  - [ ] 21.4 Menulis uji integrasi siklus OCR penuh
+    - Menguji pengenalan citra uji berisi teks dan pemetaan hasil ke Source_Text
+    - Melewati pengujian dengan penanda `skip` ketika paket OCR tidak terpasang
+    - Merujuk R7.1
+
+- [ ] 22. Checkpoint - Verifikasi akhir
+  - Memastikan seluruh uji unit, uji properti, dan uji integrasi yang tersedia lulus
+  - Memastikan setiap Acceptance Criterion pada requirements.md terpetakan ke sekurang-kurangnya satu uji atau satu baris matriks manual pada design.md
+  - Memastikan Pinux berjalan tanpa paket sistem tambahan di luar GTK4, libadwaita, dan PyGObject
+  - Memastikan seluruh pengujian lulus, jika ada keraguan tanyakan kepada pengguna

@@ -1,0 +1,14 @@
+# Lingkungan pengembangan
+.venv/
+venv/
+
+# Artefak build dan paket
+*.egg-info/
+build/
+dist/
+__pycache__/
+*.py[cod]
+
+# Cache perkakas
+.pytest_cache/
+.hypothesis/
