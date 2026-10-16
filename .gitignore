@@ -12,3 +12,7 @@ __pycache__/
 # Cache perkakas
 .pytest_cache/
 .hypothesis/
+.ohmyagent/
+
+# Patch temporer
+*.patch
