@@ -119,18 +119,20 @@ class RequestScheduler:
 
         def _dispatch_result(res: "TranslationResult") -> bool:
             with self._lock:
-                if seq != self._active_seq or token.cancelled:
+                # Urutan tidak perlu dicek di sini: _claim() di worker/timeout
+                # sudah menjamin dispatch hanya sekali per submit. Cukup cek
+                # token dibatalkan saja; hasil yang sudah diklaim tetap dikirim.
+                if token.cancelled:
                     return False
             on_result(res)
             return False
 
         def _dispatch_error(err: "TranslationError") -> bool:
             with self._lock:
-                # Jika urutan permintaan sudah berganti, abaikan
-                if seq != self._active_seq:
-                    return False
-                # Jika token dibatalkan tetapi bukan karena timeout yang sedang dilaporkan
-                if token.cancelled and err.kind != "timeout" and err.kind != "cancelled":
+                # Timeout/cancel yang sudah diklaim via _claim() tetap dikirim
+                # meskipun seq berubah; hanya error "provider" yang tidak
+                # diinginkan dari token yang sudah dibatalkan yang diabaikan.
+                if token.cancelled and err.kind not in ("timeout", "cancelled"):
                     return False
             on_error(err)
             return False

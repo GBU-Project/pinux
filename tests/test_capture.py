@@ -70,13 +70,13 @@ def test_detect_desktop_session_x11(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_wayland_also_prefers_selection() -> None:
-    """Terjemah seleksi ala Bob: seleksi didahulukan juga pada Wayland."""
+    """Pada Wayland, primary tidak ada — jatuh balik ke clipboard (R2.2)."""
     backend = MockClipboardBackend(clipboard_text="Teks Clipboard", primary_text="Teks Primary")
     capturer = TextCapturer(backend=backend, session_type="wayland")
 
     res = capturer.read_source_text()
-    assert res.text == "Teks Primary"
-    assert res.origin == "primary"
+    assert res.text == "Teks Clipboard"
+    assert res.origin == "clipboard"
 
 
 def test_prioritizes_most_recently_changed_source() -> None:

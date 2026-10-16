@@ -235,7 +235,12 @@ class TextCapturer:
         # Terjemah seleksi ala Bob: teks yang baru disorot didahulukan. Bila
         # clipboard diubah lebih baru daripada seleksi (mis. Ctrl+C), clipboard
         # yang dipakai. Tanpa riwayat perubahan, seleksi didahulukan (R2.2).
-        use_primary = bool(primary_text) and primary_text != clipboard_text
+        # Primary selection hanya ada di X11 (R2.2); di Wayland origin "primary" tidak sah.
+        use_primary = (
+            bool(primary_text)
+            and primary_text != clipboard_text
+            and self._session_type == "x11"
+        )
         if use_primary and self._changed_at["clipboard"] > self._changed_at["primary"]:
             use_primary = False
 
