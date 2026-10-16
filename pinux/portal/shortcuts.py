@@ -208,19 +208,28 @@ class GlobalShortcutsPortal:
 
     def configure_shortcuts(self, parent_window: str = "") -> None:
         """Buka dialog konfigurasi pintasan bawaan sistem desktop (ConfigureShortcuts)."""
-        if not self._session_path:
-            return
-        try:
-            bus = self._get_bus()
-            portal = bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
-            iface = dbus.Interface(portal, GLOBAL_SHORTCUTS_INTERFACE)
-            iface.ConfigureShortcuts(
-                dbus.ObjectPath(self._session_path),
-                dbus.String(parent_window),
-                {},
-            )
-        except Exception as exc:
-            logger.warning(f"Gagal memanggil ConfigureShortcuts: {exc}")
+        portal_opened = False
+        if self._session_path:
+            try:
+                bus = self._get_bus()
+                portal = bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
+                iface = dbus.Interface(portal, GLOBAL_SHORTCUTS_INTERFACE)
+                iface.ConfigureShortcuts(
+                    dbus.ObjectPath(self._session_path),
+                    dbus.String(parent_window),
+                    {},
+                )
+                portal_opened = True
+            except Exception as exc:
+                logger.info(f"Portal ConfigureShortcuts tidak didukung/gagal ({exc}), membuka Pengaturan Sistem GNOME.")
+
+        if not portal_opened:
+            import subprocess
+            try:
+                subprocess.Popen(["gnome-control-center", "keyboard"])
+            except Exception as exc:
+                logger.warning(f"Gagal membuka gnome-control-center keyboard: {exc}")
+
 
     def unbind(self, bindings: Sequence[BoundShortcut]) -> None:
         """Lepaskan pintasan atau tutup sesi."""

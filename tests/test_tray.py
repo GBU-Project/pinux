@@ -72,24 +72,39 @@ def test_tray_item_menu_events() -> None:
     # 11 item (termasuk separator dan versi info)
     assert len(root[2]) == 11
 
+    from gi.repository import GLib
+
+    def run_idle() -> None:
+        ctx = GLib.MainContext.default()
+        while ctx.iteration(False):
+            pass
+
     # Uji seluruh event klik
     service.Event(1, "clicked", None, 0)
+    run_idle()
     assert events_called["translate_selection"] is True
 
     service.Event(2, "clicked", None, 0)
+    run_idle()
     assert events_called["ocr_translate"] is True
 
     service.Event(3, "clicked", None, 0)
+    run_idle()
     assert events_called["input_translate"] is True
 
     service.Event(4, "clicked", None, 0)
+    run_idle()
     assert events_called["show_popup"] is True
 
     service.Event(6, "clicked", None, 0)
+    run_idle()
     assert events_called["ocr_pure"] is True
 
     service.Event(8, "clicked", None, 0)
+    run_idle()
     assert events_called["settings"] is True
 
     service.Event(11, "clicked", None, 0)
+    run_idle()
     assert events_called["quit"] is True
+

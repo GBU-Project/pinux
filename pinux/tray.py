@@ -143,30 +143,41 @@ class DbusMenuService(dbus.service.Object):
     @dbus.service.method(DBUSMENU_INTERFACE, in_signature="isvu", out_signature="")
     def Event(self, item_id: int, event_id: str, data: Any, timestamp: int) -> None:
         """Tangani klik pada item menu."""
+        from gi.repository import GLib
+
         if event_id in ("clicked", "activate"):
             if item_id == 1 and self._on_translate_selection is not None:
-                self._on_translate_selection()
+                GLib.idle_add(self._on_translate_selection)
             elif item_id == 2 and self._on_ocr_translate is not None:
-                self._on_ocr_translate()
+                GLib.idle_add(self._on_ocr_translate)
             elif item_id == 3 and self._on_input_translate is not None:
-                self._on_input_translate()
+                GLib.idle_add(self._on_input_translate)
             elif item_id == 4 and self._on_show_popup is not None:
-                self._on_show_popup()
+                GLib.idle_add(self._on_show_popup)
             elif item_id == 6 and self._on_ocr_pure is not None:
-                self._on_ocr_pure()
+                GLib.idle_add(self._on_ocr_pure)
             elif item_id == 8 and self._on_settings is not None:
-                self._on_settings()
+                GLib.idle_add(self._on_settings)
             elif item_id == 11 and self._on_quit is not None:
-                self._on_quit()
+                GLib.idle_add(self._on_quit)
 
 
 
 class StatusNotifierItemService(dbus.service.Object):
     """Layanan D-Bus untuk StatusNotifierItem."""
 
-    def __init__(self, bus: dbus.Bus, object_path: str, menu_path: str) -> None:
+    def __init__(
+        self,
+        bus: dbus.Bus,
+        object_path: str,
+        menu_path: str,
+        on_activate: Callable[[], None] | None = None,
+        on_context_menu: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(bus, object_path)
         self._menu_path = menu_path
+        self._on_activate = on_activate
+        self._on_context_menu = on_context_menu
 
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
     def Get(self, interface_name: str, property_name: str) -> Any:
@@ -206,16 +217,27 @@ class StatusNotifierItemService(dbus.service.Object):
     @dbus.service.method(SNI_INTERFACE, in_signature="ii", out_signature="")
     def ContextMenu(self, x: int, y: int) -> None:
         """Dipanggil saat klik kanan jika host tidak memakai com.canonical.dbusmenu langsung."""
-        pass
+        from gi.repository import GLib
+
+        if self._on_context_menu is not None:
+            GLib.idle_add(self._on_context_menu)
 
     @dbus.service.method(SNI_INTERFACE, in_signature="ii", out_signature="")
     def Activate(self, x: int, y: int) -> None:
         """Dipanggil saat ikon tray diklik kiri."""
-        pass
+        from gi.repository import GLib
+
+        if self._on_activate is not None:
+            GLib.idle_add(self._on_activate)
 
     @dbus.service.method(SNI_INTERFACE, in_signature="ii", out_signature="")
     def SecondaryActivate(self, x: int, y: int) -> None:
         """Dipanggil saat ikon tray diklik tengah."""
+        pass
+
+    @dbus.service.method(SNI_INTERFACE, in_signature="s", out_signature="")
+    def ProvideXdgActivationToken(self, token: str) -> None:
+        """Terima token aktivasi dari desktop host GNOME/Wayland."""
         pass
 
     @dbus.service.signal(SNI_INTERFACE)
@@ -229,6 +251,7 @@ class StatusNotifierItemService(dbus.service.Object):
     @dbus.service.signal(SNI_INTERFACE)
     def NewStatus(self, status: str) -> None:
         pass
+
 
 
 
@@ -312,6 +335,8 @@ class TrayItem:
                 bus=bus,
                 object_path=sni_path,
                 menu_path=menu_path,
+                on_activate=self._on_show_popup or self._on_translate_selection,
+                on_context_menu=self._on_settings,
             )
 
             # Panggil RegisterStatusNotifierItem pada watcher
