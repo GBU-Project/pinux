@@ -34,6 +34,17 @@ __all__ = ["PopupWindow"]
 logger = logging.getLogger("pinux.ui.popup")
 
 
+class SourceTextView(Gtk.TextView):
+    """Kolom teks sumber multi-baris dengan API mirip ``Gtk.Entry``."""
+
+    def get_text(self) -> str:
+        buf = self.get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+
+    def set_text(self, text: str) -> None:
+        self.get_buffer().set_text(text)
+
+
 class PopupWindow(Gtk.Window):
     """Jendela popup terjemahan GTK4."""
 
@@ -137,10 +148,24 @@ class PopupWindow(Gtk.Window):
         main_box.append(header_box)
 
         # Input Source_Text
-        self._entry = Gtk.Entry()
-        self._entry.set_placeholder_text("Ketik atau sorot teks...")
-        self._entry.connect("changed", self._on_entry_changed)
-        main_box.append(self._entry)
+        # Multi-baris: Enter menerjemahkan, Shift+Enter menyisipkan baris baru
+        # (seperti jendela input Bob).
+        self._entry = SourceTextView()
+        self._entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._entry.set_accepts_tab(False)
+        self._entry.set_tooltip_text("Ketik atau sorot teks. Enter: terjemahkan, Shift+Enter: baris baru")
+        self._entry.get_buffer().connect("changed", self._on_entry_changed)
+        entry_keys = Gtk.EventControllerKey.new()
+        entry_keys.connect("key-pressed", self._on_entry_key_pressed)
+        self._entry.add_controller(entry_keys)
+
+        self._entry_scroller = Gtk.ScrolledWindow()
+        self._entry_scroller.set_child(self._entry)
+        self._entry_scroller.set_min_content_height(56)
+        self._entry_scroller.set_max_content_height(160)
+        self._entry_scroller.set_propagate_natural_height(True)
+        self._entry_scroller.add_css_class("card")
+        main_box.append(self._entry_scroller)
 
         # Spinner & Kontainer Hasil
         self._spinner = Gtk.Spinner()
@@ -193,7 +218,26 @@ class PopupWindow(Gtk.Window):
         if not self.is_active() and not self._pinned:
             self.hide()
 
-    def _on_entry_changed(self, entry: Gtk.Entry) -> None:
+    def _on_entry_key_pressed(
+        self,
+        controller: Gtk.EventControllerKey,
+        keyval: int,
+        keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        """Enter menerjemahkan segera; Shift+Enter dibiarkan menjadi baris baru."""
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not (
+            state & Gdk.ModifierType.SHIFT_MASK
+        ):
+            if self._debounce_id is not None:
+                GLib.source_remove(self._debounce_id)
+                self._debounce_id = None
+            if self._entry.get_text().strip():
+                self._fire_text_changed(self._entry.get_text())
+            return True
+        return False
+
+    def _on_entry_changed(self, buffer: Any) -> None:
         if self._ignore_text_changes:
             return
         if self._on_text_changed is None:
@@ -203,7 +247,7 @@ class PopupWindow(Gtk.Window):
         if self._debounce_id is not None:
             GLib.source_remove(self._debounce_id)
         self._debounce_id = GLib.timeout_add(
-            self.DEBOUNCE_MS, self._fire_text_changed, entry.get_text()
+            self.DEBOUNCE_MS, self._fire_text_changed, self._entry.get_text()
         )
 
     def _fire_text_changed(self, text: str) -> bool:
@@ -232,6 +276,10 @@ class PopupWindow(Gtk.Window):
         # Pada GTK4 Wayland, penempatan jendela absolut dikendalikan compositor
         # tetapi present() menampilkan dan memfokuskan jendela.
         self.present()
+
+    def focus_input(self) -> None:
+        """Pindahkan fokus keyboard ke kolom teks sumber."""
+        self._entry.grab_focus()
 
     def set_source_text(self, text: str) -> None:
         """Ubah teks pada entry tanpa memicu loop pengiriman balik."""

@@ -45,6 +45,8 @@ Bila portal GlobalShortcuts tidak tersedia pada lingkungan desktop Anda, Anda da
 
 - **Penerjemahan Clipboard:** `pinux --trigger` (rekomendasi pintasan: `Ctrl+Alt+T`)
 - **Tangkapan Layar & OCR:** `pinux --pick-region` (rekomendasi pintasan: `Ctrl+Alt+O`)
+- **Terjemah Input:** `pinux --input` (rekomendasi pintasan: `Ctrl+Alt+A`). Ketik teks, tekan Enter untuk menerjemahkan, Shift+Enter untuk baris baru.
+- **OCR Senyap:** `pinux --ocr-copy` (rekomendasi pintasan: `Ctrl+Alt+C`). Pilih area layar, teks hasil OCR disalin ke clipboard tanpa terjemahan.
 - **Buka Jendela Pengaturan:** `pinux --settings`
 
 ## Terjemah seleksi (ala Bob)

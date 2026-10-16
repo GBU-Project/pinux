@@ -87,6 +87,7 @@ class TriggerRouter:
         popup.show_loading()
         popup._spinner.set_visible(False)
         popup.present_at_cursor(0, 0)
+        popup.focus_input()
 
     def show_popup_window(self) -> None:
         """Tampilkan jendela popup yang sedang ada."""
@@ -337,6 +338,22 @@ class PinuxApp(Adw.Application):
             None,
         )
         self.add_main_option(
+            "input",
+            ord("i"),
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            "Membuka jendela terjemah input (ketik teks lalu Enter)",
+            None,
+        )
+        self.add_main_option(
+            "ocr-copy",
+            ord("c"),
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            "Pilih area layar lalu salin teks OCR ke clipboard tanpa menerjemahkan",
+            None,
+        )
+        self.add_main_option(
             "settings",
             ord("s"),
             GLib.OptionFlags.NONE,
@@ -360,6 +377,8 @@ class PinuxApp(Adw.Application):
         # Daftarkan aksi aplikasi Gio
         self._add_action("trigger-translate", lambda *_: self.trigger_router.request_translate())
         self._add_action("trigger-ocr", lambda *_: self.trigger_router.request_ocr())
+        self._add_action("trigger-input", lambda *_: self.trigger_router.request_input_translate())
+        self._add_action("trigger-ocr-copy", lambda *_: self.trigger_router.request_ocr_pure())
         self._add_action("settings", lambda *_: self.show_settings_window())
         self._add_action("quit", lambda *_: self.quit_app())
 
@@ -409,6 +428,10 @@ class PinuxApp(Adw.Application):
             self.activate_action("trigger-translate", None)
         elif options.contains("pick-region"):
             self.activate_action("trigger-ocr", None)
+        elif options.contains("input"):
+            self.activate_action("trigger-input", None)
+        elif options.contains("ocr-copy"):
+            self.activate_action("trigger-ocr-copy", None)
         elif options.contains("settings"):
             self.activate_action("settings", None)
         else:
