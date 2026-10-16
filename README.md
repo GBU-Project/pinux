@@ -56,6 +56,6 @@ Ctrl+C, isi clipboard yang dipakai. Pada Wayland, pasang `wl-clipboard`
 
 ## Dokumentasi
 
-- `.monkeycode/specs/linux-translator/requirements.md` — kebutuhan fungsional
-- `.monkeycode/specs/linux-translator/design.md` — desain teknis
-- `.monkeycode/specs/linux-translator/tasklist.md` — rencana implementasi
+- `docs/specs/linux-translator/requirements.md` — kebutuhan fungsional
+- `docs/specs/linux-translator/design.md` — desain teknis
+- `docs/specs/linux-translator/tasklist.md` — rencana implementasi
