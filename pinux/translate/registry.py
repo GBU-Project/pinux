@@ -96,6 +96,13 @@ class ProviderRegistry:
         self.register(GoogleFreeProvider())
         self.register(OpenAICompatibleProvider())
 
+    def apply_llm_settings(self, endpoint_url: str, model: str) -> None:
+        """Terapkan endpoint/model LLM dari pengaturan ke provider 'openai'."""
+        provider = self._providers.get(OpenAICompatibleProvider.id)
+        if isinstance(provider, OpenAICompatibleProvider):
+            provider.endpoint_url = endpoint_url
+            provider.model = model
+
     @property
     def warnings(self) -> tuple[str, ...]:
         """Peringatan kegagalan impor atau pendaftaran."""

@@ -15,6 +15,7 @@ Perujuk: R2.1, R2.2, R2.3, R2.5, R5.4 pada requirements.md, serta design.md.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -67,6 +68,21 @@ def detect_desktop_session() -> DesktopSessionType:
     return "wayland"
 
 
+_CJK = re.compile(
+    "[\u2e80-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]"
+)
+
+
+def _join_wrapped_lines(lines: list[str]) -> str:
+    """Gabungkan baris; spasi hanya disisipkan bila bukan sambungan aksara CJK."""
+    out = ""
+    for line in lines:
+        if out and not (_CJK.match(out[-1]) and _CJK.match(line[0])):
+            out += " "
+        out += line
+    return out
+
+
 def clean_text(
     text: str,
     *,
@@ -76,18 +92,19 @@ def clean_text(
 ) -> str:
     """Bersihkan teks sumber menurut konfigurasi pemrosesan teks ala Bob.
 
-    - unwrap_lines: gabungkan baris terputus menjadi satu spasi (teks dari PDF).
+    - unwrap_lines: gabungkan baris terputus menjadi satu spasi (teks dari PDF/OCR).
     - remove_hyphens: hapus pemisahan kata akibat pergantian baris ('con-\\nnection' -> 'connection').
     - remove_comments: bersihkan penanda komentar baris seperti '#', '//', '/* */'.
     """
     if not text:
         return ""
 
-    result = text
+    # Samakan akhir baris (teks dari Windows/PDF memakai \r\n) agar pemisah
+    # paragraf "\n\n" dan pola tanda hubung terdeteksi benar.
+    result = text.replace("\r\n", "\n").replace("\r", "\n")
 
     # 1. Hapus simbol komentar kode pemrograman lebih dulu agar tidak menghalangi deteksi kata/baris
     if remove_comments:
-        import re
         lines = result.splitlines()
         cleaned_lines = []
         for line in lines:
@@ -101,7 +118,6 @@ def clean_text(
 
     # 2. Hapus tanda hubung pergantian baris
     if remove_hyphens:
-        import re
         result = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", result)
 
     # 3. Gabungkan baris (unwrap newlines)
@@ -110,7 +126,7 @@ def clean_text(
         paragraphs = result.split("\n\n")
         cleaned_paragraphs = []
         for p in paragraphs:
-            cleaned = " ".join(line.strip() for line in p.splitlines() if line.strip())
+            cleaned = _join_wrapped_lines([ln.strip() for ln in p.splitlines() if ln.strip()])
             if cleaned:
                 cleaned_paragraphs.append(cleaned)
         result = "\n\n".join(cleaned_paragraphs)

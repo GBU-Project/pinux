@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from pinux.config import (
+    LlmSettings,
     OcrSettings,
     PopupSettings,
     ProviderEntry,
@@ -68,6 +69,7 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
         "popup",
         "ocr",
         "text_processing",
+        "llm",
         "providers",
     }
 )
@@ -188,6 +190,10 @@ def render_settings(settings: Settings) -> str:
         f"remove_hyphens = {_toml_value(settings.text_processing.remove_hyphens)}",
         f"remove_comments = {_toml_value(settings.text_processing.remove_comments)}",
         f"auto_copy_result = {_toml_value(settings.text_processing.auto_copy_result)}",
+        "",
+        "[llm]",
+        f"endpoint_url = {_toml_value(settings.llm.endpoint_url)}",
+        f"model = {_toml_value(settings.llm.model)}",
     ]
 
     for entry in settings.providers:
@@ -304,6 +310,10 @@ class ConfigStore:
         if text_processing is not None:
             self._read_text_processing(text_processing, settings.text_processing)
 
+        llm = document.get("llm")
+        if llm is not None:
+            self._read_llm(llm, settings.llm)
+
         providers = document.get("providers")
         if providers is not None:
             settings.providers = self._read_providers(providers)
@@ -417,6 +427,17 @@ class ConfigStore:
         tp.remove_hyphens = self._read_bool(table, "remove_hyphens", tp.remove_hyphens, "text_processing.")
         tp.remove_comments = self._read_bool(table, "remove_comments", tp.remove_comments, "text_processing.")
         tp.auto_copy_result = self._read_bool(table, "auto_copy_result", tp.auto_copy_result, "text_processing.")
+
+    def _read_llm(self, table: Any, llm: LlmSettings) -> None:
+        if not isinstance(table, Mapping):
+            self._warn("Bagian [llm] harus berupa tabel; nilai bawaan dipakai")
+            return
+        endpoint = self._read_str(table, "endpoint_url", llm.endpoint_url)
+        if not endpoint.startswith(("http://", "https://")):
+            self._warn("Nilai llm.endpoint_url harus diawali http:// atau https://; nilai bawaan dipakai")
+            endpoint = llm.endpoint_url
+        llm.endpoint_url = endpoint
+        llm.model = self._read_str(table, "model", llm.model)
 
     def _read_providers(self, table: Any) -> list[ProviderEntry]:
         if not isinstance(table, list):

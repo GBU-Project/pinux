@@ -211,6 +211,28 @@ class SettingsWindow(Adw.PreferencesWindow):
             self._provider_rows[p.id] = row
 
         page.add(group)
+
+        # Pengaturan model & endpoint untuk LLM / OpenAI-compatible
+        llm_group = Adw.PreferencesGroup()
+        llm_group.set_title("Konfigurasi LLM (OpenAI / Ollama)")
+        llm_group.set_description(
+            "Gunakan endpoint lokal (seperti Ollama http://localhost:11434/v1/chat/completions) "
+            "atau API cloud OpenAI."
+        )
+
+        self._llm_endpoint_row = Adw.EntryRow()
+        self._llm_endpoint_row.set_title("Endpoint URL")
+        self._llm_endpoint_row.set_text(self._settings.llm.endpoint_url)
+        self._llm_endpoint_row.connect("changed", self._on_llm_changed)
+        llm_group.add(self._llm_endpoint_row)
+
+        self._llm_model_row = Adw.EntryRow()
+        self._llm_model_row.set_title("Nama Model")
+        self._llm_model_row.set_text(self._settings.llm.model)
+        self._llm_model_row.connect("changed", self._on_llm_changed)
+        llm_group.add(self._llm_model_row)
+
+        page.add(llm_group)
         self.add(page)
 
     # -- Halaman Pintasan -----------------------------------------------------
@@ -311,6 +333,12 @@ class SettingsWindow(Adw.PreferencesWindow):
         self._settings.text_processing.remove_hyphens = self._remove_hyphens_row.get_active()
         self._settings.text_processing.remove_comments = self._remove_comments_row.get_active()
         self._settings.text_processing.auto_copy_result = self._auto_copy_result_row.get_active()
+
+        self._save_and_notify()
+
+    def _on_llm_changed(self, *args: Any) -> None:
+        self._settings.llm.endpoint_url = self._llm_endpoint_row.get_text()
+        self._settings.llm.model = self._llm_model_row.get_text()
 
         self._save_and_notify()
 

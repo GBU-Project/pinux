@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 __all__ = [
+    "LlmSettings",
     "OcrSettings",
     "PopupSettings",
     "ProviderEntry",
@@ -56,6 +57,14 @@ class ProviderEntry:
 
 
 @dataclass
+class LlmSettings:
+    """Endpoint dan model untuk provider OpenAI-compatible (Ollama, OpenAI, dll.)."""
+
+    endpoint_url: str = "https://api.openai.com/v1/chat/completions"
+    model: str = "gpt-4o-mini"
+
+
+@dataclass
 class TextProcessingSettings:
     """Pengaturan pembersihan teks sebelum penerjemahan ala Bob."""
 
@@ -78,4 +87,5 @@ class Settings:
     popup: PopupSettings = field(default_factory=PopupSettings)
     ocr: OcrSettings = field(default_factory=OcrSettings)
     text_processing: TextProcessingSettings = field(default_factory=TextProcessingSettings)
+    llm: LlmSettings = field(default_factory=LlmSettings)
     providers: list[ProviderEntry] = field(default_factory=list)

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from pinux.config import (
+    LlmSettings,
     OcrSettings,
     PopupSettings,
     ProviderEntry,
@@ -614,6 +615,16 @@ text_processing_settings_st = st.builds(
     auto_copy_result=st.booleans(),
 )
 
+llm_settings_st = st.builds(
+    LlmSettings,
+    endpoint_url=st.sampled_from([
+        "https://api.openai.com/v1/chat/completions",
+        "http://localhost:11434/v1/chat/completions",
+        "http://127.0.0.1:1234/v1/chat/completions",
+    ]),
+    model=safe_text_st,
+)
+
 settings_st = st.builds(
     Settings,
     target_language=identifier_st,
@@ -626,6 +637,7 @@ settings_st = st.builds(
     ocr=ocr_settings_st,
     providers=st.lists(provider_entry_st, max_size=5),
     text_processing=text_processing_settings_st,
+    llm=llm_settings_st,
 )
 
 
@@ -648,4 +660,5 @@ def test_property_10_settings_round_trip(tmp_path_factory: pytest.TempPathFactor
     assert loaded.ocr == settings.ocr
     assert loaded.providers == settings.providers
     assert loaded.text_processing == settings.text_processing
+    assert loaded.llm == settings.llm
 

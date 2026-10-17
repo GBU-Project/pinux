@@ -64,9 +64,14 @@ class OpenAICompatibleProvider:
         self.model = model
         self.timeout_s = timeout_s
 
+    def _is_local_endpoint(self) -> bool:
+        """True bila endpoint lokal (Ollama/LM Studio), yang tidak memerlukan API key."""
+        host = (urllib.parse.urlparse(self.endpoint_url).hostname or "").lower()
+        return host in ("localhost", "::1") or host.startswith("127.")
+
     def requires_credential(self) -> bool:
-        """Memerlukan API key (bisa token sembarang jika Ollama lokal)."""
-        return True
+        """API key wajib, kecuali endpoint lokal (Ollama/LM Studio)."""
+        return not self._is_local_endpoint()
 
     def list_languages(self) -> Sequence[Language]:
         return SUPPORTED_LANGUAGES
@@ -85,7 +90,7 @@ class OpenAICompatibleProvider:
             )
 
         api_key = credential.strip() if credential else ""
-        if not api_key and "localhost" not in self.endpoint_url and "127.0.0.1" not in self.endpoint_url:
+        if not api_key and not self._is_local_endpoint():
             raise TranslationError(
                 kind="auth",
                 provider_id=self.id,
@@ -147,11 +152,23 @@ class OpenAICompatibleProvider:
                 kind = "provider"
                 msg = f"Galat dari API (HTTP {err.code})"
             raise TranslationError(kind=kind, provider_id=self.id, message=msg) from err
-        except (urllib.error.URLError, socket.timeout, TimeoutError) as err:
+        except (socket.timeout, TimeoutError) as err:
             raise TranslationError(
                 kind="timeout",
                 provider_id=self.id,
                 message=f"Koneksi ke endpoint LLM timeout: {err}",
+            ) from err
+        except urllib.error.URLError as err:
+            if isinstance(err.reason, (socket.timeout, TimeoutError)):
+                raise TranslationError(
+                    kind="timeout",
+                    provider_id=self.id,
+                    message=f"Koneksi ke endpoint LLM timeout: {err.reason}",
+                ) from err
+            raise TranslationError(
+                kind="network",
+                provider_id=self.id,
+                message=f"Endpoint LLM tidak dapat dijangkau: {err.reason}",
             ) from err
         except Exception as err:
             raise TranslationError(

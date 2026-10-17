@@ -135,9 +135,17 @@ class GoogleFreeProvider:
     id: Final[str] = "google-free"
     display_name: Final[str] = "Google Terjemahan (Gratis)"
 
-    def __init__(self, *, timeout_s: float = 10.0, base_url: str = ENDPOINT_URL) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_s: float = 10.0,
+        base_url: str = ENDPOINT_URL,
+        retry_delay_s: float = 1.0,
+    ) -> None:
         self.timeout_s = timeout_s
         self.base_url = base_url
+        #: Jeda sebelum satu putaran ulang bila semua endpoint membalas 429.
+        self.retry_delay_s = retry_delay_s
 
     def requires_credential(self) -> bool:
         """Provider gratis ini tidak memerlukan API key / kredensial."""
@@ -147,6 +155,77 @@ class GoogleFreeProvider:
         """Kembalikan daftar bahasa yang didukung."""
         return SUPPORTED_LANGUAGES
 
+    def _cancelled(self) -> TranslationError:
+        return TranslationError(
+            kind="cancelled",
+            provider_id=self.id,
+            message="Permintaan penerjemahan dibatalkan",
+        )
+
+    def _rate_limited(self) -> TranslationError:
+        return TranslationError(
+            kind="rate_limit",
+            provider_id=self.id,
+            message="Batas laju permintaan tercapai (HTTP 429). Silakan tunggu sebentar.",
+        )
+
+    def _try_endpoint(
+        self,
+        req: urllib.request.Request,
+        cancel: CancelToken | None,
+    ) -> str:
+        """Kirim satu permintaan; kembalikan teks respons atau munculkan TranslationError."""
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
+                if cancel is not None and cancel.cancelled:
+                    raise self._cancelled()
+                text = response.read().decode("utf-8")
+        except TranslationError:
+            raise
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                raise self._rate_limited() from exc
+            if exc.code in (401, 403):
+                raise TranslationError(
+                    kind="auth",
+                    provider_id=self.id,
+                    message=f"Akses ditolak oleh provider (HTTP {exc.code}).",
+                ) from exc
+            raise TranslationError(
+                kind="provider",
+                provider_id=self.id,
+                message=f"Provider mengembalikan galat HTTP {exc.code}: {exc.reason}",
+            ) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise TranslationError(
+                kind="timeout",
+                provider_id=self.id,
+                message=f"Permintaan melebihi batas waktu {self.timeout_s}s: {exc}",
+            ) from exc
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise TranslationError(
+                    kind="timeout",
+                    provider_id=self.id,
+                    message=f"Permintaan melebihi batas waktu: {exc.reason}",
+                ) from exc
+            raise TranslationError(
+                kind="network",
+                provider_id=self.id,
+                message=f"Koneksi jaringan tidak tersedia atau gagal: {exc.reason}",
+            ) from exc
+        except OSError as exc:
+            raise TranslationError(
+                kind="network",
+                provider_id=self.id,
+                message=f"Gagal koneksi jaringan sistem: {exc}",
+            ) from exc
+
+        if text.strip().startswith("<"):
+            # Halaman blokir HTML / CAPTCHA Google dianggap batas laju.
+            raise self._rate_limited()
+        return text
+
     def translate(
         self,
         request: TranslationRequest,
@@ -155,14 +234,13 @@ class GoogleFreeProvider:
     ) -> TranslationResult:
         """Terjemahkan request ke target_lang.
 
-        Memeriksa cancel token dan memetakan semua kegagalan ke TranslationError.
+        Teks dikirim lewat badan POST agar teks panjang tidak melampaui batas
+        panjang URL. Endpoint cadangan dicoba bila yang pertama gagal; bila
+        semuanya membalas batas laju, satu putaran ulang dicoba setelah jeda.
+        Semua kegagalan dipetakan ke TranslationError.
         """
         if cancel is not None and cancel.cancelled:
-            raise TranslationError(
-                kind="cancelled",
-                provider_id=self.id,
-                message="Permintaan penerjemahan dibatalkan",
-            )
+            raise self._cancelled()
 
         # Jika teks kosong, kembalikan hasil kosong langsung
         if not request.text.strip():
@@ -172,125 +250,69 @@ class GoogleFreeProvider:
                 provider_id=self.id,
             )
 
-        url = build_request_url(
-            text=request.text,
-            source_lang=request.source_lang,
-            target_lang=request.target_lang,
-            base_url=self.base_url,
-        )
-
-        urls_to_try = [
-            url,
-            build_request_url(
-                text=request.text,
+        def _endpoint(client: str, base_url: str) -> str:
+            return build_request_url(
+                text="",
                 source_lang=request.source_lang,
                 target_lang=request.target_lang,
-                client="at",
-                base_url="https://translate.google.com/translate_a/single",
-            ),
-        ]
+                client=client,
+                base_url=base_url,
+            ).rsplit("&q=", 1)[0]
 
+        urls = [_endpoint("gtx", self.base_url)]
+        if self.base_url == ENDPOINT_URL:  # cadangan hanya untuk endpoint bawaan
+            urls.append(_endpoint("at", "https://translate.google.com/translate_a/single"))
+
+        body = urllib.parse.urlencode({"q": request.text}).encode("utf-8")
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             ),
             "Accept": "*/*",
+            "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
         }
 
         raw_text: str | None = None
         last_error: TranslationError | None = None
-
-        for u in urls_to_try:
-            if cancel is not None and cancel.cancelled:
-                raise TranslationError(
-                    kind="cancelled",
-                    provider_id=self.id,
-                    message="Permintaan penerjemahan dibatalkan",
-                )
-            req = urllib.request.Request(u, headers=headers, method="GET")
-
-            try:
-                with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
+        for attempt in range(2):
+            if attempt == 1:
+                deadline = time.monotonic() + self.retry_delay_s
+                while time.monotonic() < deadline:
                     if cancel is not None and cancel.cancelled:
-                        raise TranslationError(
-                            kind="cancelled",
-                            provider_id=self.id,
-                            message="Permintaan penerjemahan dibatalkan",
-                        )
-                    raw_bytes = response.read()
-                    text_candidate = raw_bytes.decode("utf-8")
-                    if text_candidate.strip().startswith("<"):
-                        # Respons berupa halaman blokir HTML / CAPTCHA Google
-                        last_error = TranslationError(
-                            kind="rate_limit",
-                            provider_id=self.id,
-                            message="Batas laju permintaan tercapai (HTTP 429). Silakan tunggu sebentar.",
-                        )
-                        continue
-                    raw_text = text_candidate
+                        raise self._cancelled()
+                    time.sleep(0.05)
+
+            for url in urls:
+                if cancel is not None and cancel.cancelled:
+                    raise self._cancelled()
+                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+                try:
+                    raw_text = self._try_endpoint(req, cancel)
                     break
-            except urllib.error.HTTPError as exc:
-                if exc.code == 429:
-                    last_error = TranslationError(
-                        kind="rate_limit",
-                        provider_id=self.id,
-                        message="Batas laju permintaan tercapai (HTTP 429). Silakan tunggu sebentar.",
-                    )
-                    continue
-                elif exc.code in (401, 403):
-                    last_error = TranslationError(
-                        kind="auth",
-                        provider_id=self.id,
-                        message=f"Akses ditolak oleh provider (HTTP {exc.code}).",
-                    )
-                else:
-                    last_error = TranslationError(
-                        kind="provider",
-                        provider_id=self.id,
-                        message=f"Provider mengembalikan galat HTTP {exc.code}: {exc.reason}",
-                    )
-            except (TimeoutError, socket.timeout) as exc:
-                last_error = TranslationError(
-                    kind="timeout",
-                    provider_id=self.id,
-                    message=f"Permintaan melebihi batas waktu {self.timeout_s}s: {exc}",
-                )
-            except urllib.error.URLError as exc:
-                if isinstance(exc.reason, (TimeoutError, socket.timeout)):
-                    last_error = TranslationError(
-                        kind="timeout",
-                        provider_id=self.id,
-                        message=f"Permintaan melebihi batas waktu: {exc.reason}",
-                    )
-                else:
-                    last_error = TranslationError(
-                        kind="network",
-                        provider_id=self.id,
-                        message=f"Koneksi jaringan tidak tersedia atau gagal: {exc.reason}",
-                    )
-            except OSError as exc:
-                last_error = TranslationError(
-                    kind="network",
-                    provider_id=self.id,
-                    message=f"Gagal koneksi jaringan sistem: {exc}",
-                )
+                except TranslationError as err:
+                    if err.kind == "cancelled":
+                        raise
+                    last_error = err
+            if raw_text is not None:
+                break
+            if not (
+                attempt == 0
+                and self.retry_delay_s > 0
+                and last_error is not None
+                and last_error.kind == "rate_limit"
+            ):
+                break
 
         if raw_text is None:
-            if last_error is not None:
-                raise last_error
-            raise TranslationError(
+            raise last_error or TranslationError(
                 kind="provider",
                 provider_id=self.id,
                 message="Semua endpoint Google Translate gagal merespons",
             )
 
         if cancel is not None and cancel.cancelled:
-            raise TranslationError(
-                kind="cancelled",
-                provider_id=self.id,
-                message="Permintaan penerjemahan dibatalkan",
-            )
+            raise self._cancelled()
 
         return parse_response(
             raw_text,

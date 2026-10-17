@@ -169,7 +169,7 @@ def test_translate_cancelled_before_request() -> None:
     ],
 )
 def test_http_errors_mapping(http_code: int, expected_kind: str) -> None:
-    provider = GoogleFreeProvider()
+    provider = GoogleFreeProvider(retry_delay_s=0)
     err = urllib.error.HTTPError("http://dummy", http_code, "Err", {}, None)
 
     with patch("urllib.request.urlopen", side_effect=err):
@@ -221,7 +221,7 @@ def test_property_error_mapping_always_yields_valid_translation_error(
     error: Exception,
 ) -> None:
     """Semua kegagalan jaringan/HTTP harus menghasilkan TranslationError yang valid."""
-    provider = GoogleFreeProvider()
+    provider = GoogleFreeProvider(retry_delay_s=0)
     req = TranslationRequest(text="Hello Test", source_lang=None, target_lang="id")
 
     with patch("urllib.request.urlopen", side_effect=error):

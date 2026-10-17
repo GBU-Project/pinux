@@ -220,7 +220,7 @@ class TriggerRouter:
             if res.detected_source_lang == target_lang and settings.fallback_language != target_lang:
                 final_target_lang = settings.fallback_language
                 fallback_req = TranslationRequest(
-                    text=text,
+                    text=cleaned_text or text,
                     source_lang=res.detected_source_lang,
                     target_lang=settings.fallback_language,
                 )
@@ -289,6 +289,9 @@ class PinuxApp(Adw.Application):
         self.settings: Settings = self.config_store.load()
         # Muat provider pihak ketiga dari berkas pengaturan
         self.provider_registry.load_from_entries(self.settings.providers)
+        self.provider_registry.apply_llm_settings(
+            self.settings.llm.endpoint_url, self.settings.llm.model
+        )
         self.provider_registry.load_from_entry_points()
 
         self.trigger_router = TriggerRouter(self)
@@ -455,6 +458,9 @@ class PinuxApp(Adw.Application):
     def _on_config_changed(self, new_settings: Settings) -> None:
         """Diterapkan otomatis saat file pinux.toml berubah (R9.4)."""
         self.settings = new_settings
+        self.provider_registry.apply_llm_settings(
+            new_settings.llm.endpoint_url, new_settings.llm.model
+        )
         if self._popup_window is not None:
             self._popup_window.pinned = new_settings.popup.pin_default
 
