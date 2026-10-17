@@ -21,8 +21,9 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   - --own-name=org.kde.StatusNotifierItem.*
 
-  # Text-to-speech (speech-dispatcher di host)
-  - --socket=speech-dispatcher
+  # Audio / Text-to-speech
+  - --socket=pulseaudio
+  - --filesystem=xdg-run/speech-dispatcher:ro
 
   # Akses ke Ollama / Local LLM di host (localhost / 127.0.0.1)
   # (Flatpak sandbox secara default mengizinkan koneksi loopback saat network aktif)
