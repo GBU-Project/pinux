@@ -203,6 +203,9 @@ class TriggerRouter:
             )
             return
 
+        # Bahasa yang dipilih pengguna di dropdown popup berlaku untuk setiap terjemahan.
+        if source_lang is None:
+            source_lang = popup.source_lang
         # Atur target bahasa (tangani auto dan fallback jika source sama dengan target - R4.4)
         if target_lang is None:
             target_lang = settings.target_language
@@ -236,7 +239,10 @@ class TriggerRouter:
                 _on_final_result(res)
 
         def _on_final_result(res: Any) -> None:
-            popup.set_languages_display(res.detected_source_lang, final_target_lang)
+            popup.set_languages_display(
+                popup.source_lang or "auto", final_target_lang
+            )
+            popup.show_detected_language(res.detected_source_lang)
             popup.show_result(res)
             # Auto-copy hasil terjemahan jika diaktifkan di pengaturan ala Bob
             if settings.text_processing.auto_copy_result and res.text:
@@ -496,6 +502,10 @@ class PinuxApp(Adw.Application):
     def _on_language_changed(self, source_lang: str | None, target_lang: str) -> None:
         """Picu penerjemahan ulang jika pengguna mengubah bahasa dari dropdown popup."""
         self.settings.target_language = target_lang
+        try:
+            self.config_store.save(self.settings)
+        except Exception as exc:
+            logger.warning(f"Gagal menyimpan bahasa tujuan: {exc}")
         if self._popup_window is None:
             return
         text = self._popup_window.source_text.strip()

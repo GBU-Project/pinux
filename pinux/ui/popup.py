@@ -376,6 +376,23 @@ class PopupWindow(Gtk.Window):
         if self._on_language_selected is not None:
             self._on_language_selected(self._current_source_lang, self._current_target_lang)
 
+    @property
+    def source_lang(self) -> str | None:
+        """Bahasa sumber terpilih; None berarti deteksi otomatis."""
+        return self._current_source_lang
+
+    @property
+    def target_lang(self) -> str:
+        """Bahasa tujuan terpilih di dropdown."""
+        return self._current_target_lang
+
+    def show_detected_language(self, detected: str | None) -> None:
+        """Tampilkan bahasa terdeteksi sebagai label tanpa mengunci dropdown sumber."""
+        if self._current_source_lang is None and detected:
+            self._lang_label.set_text(f"(terdeteksi: {detected})")
+        else:
+            self._lang_label.set_text("")
+
     def set_languages_display(self, source: str, target: str) -> None:
         """Perbarui dropdown dan label bahasa aktif (misal: 'id → en')."""
         self._ignore_lang_changes = True
