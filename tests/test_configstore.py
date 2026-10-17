@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from pinux.config import OcrSettings, PopupSettings, ProviderEntry, Settings
+from pinux.config import (
+    OcrSettings,
+    PopupSettings,
+    ProviderEntry,
+    Settings,
+    TextProcessingSettings,
+)
 from pinux.configstore import (
     CONFIG_FILE_NAME,
     DEFAULT_SETTINGS,
@@ -600,6 +606,14 @@ ocr_settings_st = st.builds(
     enabled=st.booleans(),
 )
 
+text_processing_settings_st = st.builds(
+    TextProcessingSettings,
+    unwrap_lines=st.booleans(),
+    remove_hyphens=st.booleans(),
+    remove_comments=st.booleans(),
+    auto_copy_result=st.booleans(),
+)
+
 settings_st = st.builds(
     Settings,
     target_language=identifier_st,
@@ -611,6 +625,7 @@ settings_st = st.builds(
     popup=popup_settings_st,
     ocr=ocr_settings_st,
     providers=st.lists(provider_entry_st, max_size=5),
+    text_processing=text_processing_settings_st,
 )
 
 
@@ -632,3 +647,5 @@ def test_property_10_settings_round_trip(tmp_path_factory: pytest.TempPathFactor
     assert loaded.popup == settings.popup
     assert loaded.ocr == settings.ocr
     assert loaded.providers == settings.providers
+    assert loaded.text_processing == settings.text_processing
+

@@ -74,6 +74,7 @@ class PopupWindow(Gtk.Window):
         on_text_changed: Callable[[str], None] | None = None,
         on_swap_languages: Callable[[], None] | None = None,
         on_language_selected: Callable[[str | None, str], None] | None = None,
+        on_retry: Callable[[], None] | None = None,
         on_copy_result: Callable[[str], None] | None = None,
         on_trigger_ocr: Callable[[], None] | None = None,
         pin_default: bool = False,
@@ -84,6 +85,7 @@ class PopupWindow(Gtk.Window):
         self._on_text_changed = on_text_changed
         self._on_swap_languages = on_swap_languages
         self._on_language_selected = on_language_selected
+        self._on_retry = on_retry
         self._on_copy_result = on_copy_result
         self._on_trigger_ocr = on_trigger_ocr
 
@@ -174,13 +176,13 @@ class PopupWindow(Gtk.Window):
 
         # Tombol Salin
         self._copy_button = Gtk.Button(icon_name="edit-copy-symbolic")
-        self._copy_button.set_tooltip_text("Salin hasil terjemahan")
+        self._copy_button.set_tooltip_text("Salin hasil terjemahan (Ctrl+Shift+C)")
         self._copy_button.connect("clicked", self._on_copy_clicked)
         header_box.append(self._copy_button)
 
         # Tombol Pin
         self._pin_button = Gtk.ToggleButton(icon_name="view-pin-symbolic")
-        self._pin_button.set_tooltip_text("Pertahankan jendela tetap terbuka (Pin)")
+        self._pin_button.set_tooltip_text("Pertahankan jendela tetap terbuka (Ctrl+P)")
         self._pin_button.set_active(self._pinned)
         self._pin_button.connect("toggled", self._on_pin_toggled)
         header_box.append(self._pin_button)
@@ -249,9 +251,33 @@ class PopupWindow(Gtk.Window):
         keycode: int,
         state: Gdk.ModifierType,
     ) -> bool:
+        # Escape: Tutup popup
         if keyval == Gdk.KEY_Escape:
             self.hide()
             return True
+
+        is_ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        is_shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+
+        # Ctrl+R: Retry / terjemahkan ulang
+        if is_ctrl and keyval in (Gdk.KEY_r, Gdk.KEY_R):
+            if self._on_retry is not None:
+                self._on_retry()
+            elif self._on_text_changed is not None and self.source_text.strip():
+                self._on_text_changed(self.source_text.strip())
+            return True
+
+        # Ctrl+P: Toggle Pin/Unpin
+        if is_ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P):
+            self.pinned = not self.pinned
+            return True
+
+        # Ctrl+Shift+C: Salin hasil terjemahan
+        if is_ctrl and is_shift and keyval in (Gdk.KEY_c, Gdk.KEY_C):
+            if self._current_result_text and self._on_copy_result is not None:
+                self._on_copy_result(self._current_result_text)
+            return True
+
         return False
 
     def _on_is_active_changed(self, obj: Any, param: Any) -> None:

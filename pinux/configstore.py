@@ -28,7 +28,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-from pinux.config import OcrSettings, PopupSettings, ProviderEntry, Settings
+from pinux.config import (
+    OcrSettings,
+    PopupSettings,
+    ProviderEntry,
+    Settings,
+    TextProcessingSettings,
+)
 
 __all__ = [
     "APP_DIR_NAME",
@@ -61,6 +67,7 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
         "shortcuts",
         "popup",
         "ocr",
+        "text_processing",
         "providers",
     }
 )
@@ -175,6 +182,12 @@ def render_settings(settings: Settings) -> str:
         "[ocr]",
         f"engine = {_toml_value(settings.ocr.engine)}",
         f"enabled = {_toml_value(settings.ocr.enabled)}",
+        "",
+        "[text_processing]",
+        f"unwrap_lines = {_toml_value(settings.text_processing.unwrap_lines)}",
+        f"remove_hyphens = {_toml_value(settings.text_processing.remove_hyphens)}",
+        f"remove_comments = {_toml_value(settings.text_processing.remove_comments)}",
+        f"auto_copy_result = {_toml_value(settings.text_processing.auto_copy_result)}",
     ]
 
     for entry in settings.providers:
@@ -287,6 +300,10 @@ class ConfigStore:
         if ocr is not None:
             self._read_ocr(ocr, settings.ocr)
 
+        text_processing = document.get("text_processing")
+        if text_processing is not None:
+            self._read_text_processing(text_processing, settings.text_processing)
+
         providers = document.get("providers")
         if providers is not None:
             settings.providers = self._read_providers(providers)
@@ -391,6 +408,15 @@ class ConfigStore:
             return
         ocr.engine = self._read_str(table, "engine", ocr.engine)
         ocr.enabled = self._read_bool(table, "enabled", ocr.enabled, "ocr.")
+
+    def _read_text_processing(self, table: Any, tp: TextProcessingSettings) -> None:
+        if not isinstance(table, Mapping):
+            self._warn("Bagian [text_processing] harus berupa tabel; nilai bawaan dipakai")
+            return
+        tp.unwrap_lines = self._read_bool(table, "unwrap_lines", tp.unwrap_lines, "text_processing.")
+        tp.remove_hyphens = self._read_bool(table, "remove_hyphens", tp.remove_hyphens, "text_processing.")
+        tp.remove_comments = self._read_bool(table, "remove_comments", tp.remove_comments, "text_processing.")
+        tp.auto_copy_result = self._read_bool(table, "auto_copy_result", tp.auto_copy_result, "text_processing.")
 
     def _read_providers(self, table: Any) -> list[ProviderEntry]:
         if not isinstance(table, list):

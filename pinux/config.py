@@ -16,6 +16,7 @@ __all__ = [
     "PopupSettings",
     "ProviderEntry",
     "Settings",
+    "TextProcessingSettings",
     "default_shortcuts",
 ]
 
@@ -55,6 +56,16 @@ class ProviderEntry:
 
 
 @dataclass
+class TextProcessingSettings:
+    """Pengaturan pembersihan teks sebelum penerjemahan ala Bob."""
+
+    unwrap_lines: bool = False
+    remove_hyphens: bool = True
+    remove_comments: bool = False
+    auto_copy_result: bool = False
+
+
+@dataclass
 class Settings:
     """Seluruh pengaturan Pinux beserta nilai bawaannya."""
 
@@ -66,4 +77,5 @@ class Settings:
     shortcuts: dict[str, str] = field(default_factory=default_shortcuts)
     popup: PopupSettings = field(default_factory=PopupSettings)
     ocr: OcrSettings = field(default_factory=OcrSettings)
+    text_processing: TextProcessingSettings = field(default_factory=TextProcessingSettings)
     providers: list[ProviderEntry] = field(default_factory=list)

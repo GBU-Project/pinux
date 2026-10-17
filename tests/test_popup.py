@@ -185,3 +185,43 @@ def test_popup_window_language_selection() -> None:
     # Pilih bahasa sumber ke 'ja' (indeks 3 pada LANGUAGES: auto=0, id=1, en=2, ja=3)
     popup._src_dropdown.set_selected(3)
     assert selected_source == "ja"
+
+
+def test_popup_window_internal_keyboard_shortcuts() -> None:
+    retry_called = False
+    copied_text = ""
+
+    def on_retry() -> None:
+        nonlocal retry_called
+        retry_called = True
+
+    def on_copy(t: str) -> None:
+        nonlocal copied_text
+        copied_text = t
+
+    popup = PopupWindow(
+        on_retry=on_retry,
+        on_copy_result=on_copy,
+        pin_default=False,
+    )
+    popup.show_result(TranslationResult("Teks hasil", "en", "openai"))
+
+    # Test Ctrl+P (toggle pin)
+    assert popup.pinned is False
+    popup._on_key_pressed(None, Gdk.KEY_p, 0, Gdk.ModifierType.CONTROL_MASK)
+    assert popup.pinned is True
+    popup._on_key_pressed(None, Gdk.KEY_p, 0, Gdk.ModifierType.CONTROL_MASK)
+    assert popup.pinned is False
+
+    # Test Ctrl+R (retry)
+    popup._on_key_pressed(None, Gdk.KEY_r, 0, Gdk.ModifierType.CONTROL_MASK)
+    assert retry_called is True
+
+    # Test Ctrl+Shift+C (copy result)
+    popup._on_key_pressed(
+        None,
+        Gdk.KEY_c,
+        0,
+        Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK,
+    )
+    assert copied_text == "Teks hasil"

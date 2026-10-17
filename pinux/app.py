@@ -27,7 +27,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from pinux.capture.capturer import TextCapturer
+from pinux.capture.capturer import TextCapturer, clean_text
 from pinux.config import Settings
 from pinux.configstore import ConfigStore
 from pinux.credentials import CredentialStore
@@ -182,6 +182,14 @@ class TriggerRouter:
         popup.show_loading()
 
         settings = self.app.settings
+        tp = settings.text_processing
+        cleaned_text = clean_text(
+            text,
+            unwrap_lines=tp.unwrap_lines,
+            remove_hyphens=tp.remove_hyphens,
+            remove_comments=tp.remove_comments,
+        ) if text else ""
+
         provider = self.app.provider_registry.get(settings.provider)
         if provider is None:
             popup.show_error(f"Provider '{settings.provider}' tidak ditemukan.")
@@ -199,7 +207,7 @@ class TriggerRouter:
         if target_lang is None:
             target_lang = settings.target_language
         req = TranslationRequest(
-            text=text,
+            text=cleaned_text or text,
             source_lang=source_lang,
             target_lang=target_lang,
         )
@@ -230,6 +238,9 @@ class TriggerRouter:
         def _on_final_result(res: Any) -> None:
             popup.set_languages_display(res.detected_source_lang, final_target_lang)
             popup.show_result(res)
+            # Auto-copy hasil terjemahan jika diaktifkan di pengaturan ala Bob
+            if settings.text_processing.auto_copy_result and res.text:
+                self.app.text_capturer.send_to_clipboard(res.text)
 
         def _on_error(err: Any) -> None:
             popup.show_error(err.message)
@@ -454,6 +465,7 @@ class PinuxApp(Adw.Application):
                 on_text_changed=lambda t: self.trigger_router._execute_translation(t),
                 on_swap_languages=lambda: self._on_swap_languages(),
                 on_language_selected=lambda s, t: self._on_language_changed(s, t),
+                on_retry=lambda: self._on_retry_translation(),
                 on_copy_result=lambda res: self.text_capturer.send_to_clipboard(res),
                 on_trigger_ocr=lambda: self.trigger_router.request_ocr(),
                 pin_default=self.settings.popup.pin_default,
@@ -462,6 +474,18 @@ class PinuxApp(Adw.Application):
             # Setel bahasa awal sesuai pengaturan
             self._popup_window.set_languages_display("auto", self.settings.target_language)
         return self._popup_window
+
+    def _on_retry_translation(self) -> None:
+        """Picu penerjemahan ulang (Ctrl+R) menggunakan teks yang ada di popup."""
+        if self._popup_window is None:
+            return
+        text = self._popup_window.source_text.strip()
+        if text:
+            self.trigger_router._execute_translation(
+                text,
+                source_lang=self._popup_window._current_source_lang,
+                target_lang=self._popup_window._current_target_lang,
+            )
 
     def _on_language_changed(self, source_lang: str | None, target_lang: str) -> None:
         """Picu penerjemahan ulang jika pengguna mengubah bahasa dari dropdown popup."""

@@ -190,3 +190,39 @@ def test_gdk_backend_reads_text_asynchronously():
     assert GdkClipboardBackend._read_text(_FakeAsyncClipboard("halo")) == "halo"
     assert GdkClipboardBackend._read_text(_FakeAsyncClipboard("x", fail=True)) == ""
     assert GdkClipboardBackend._read_text(None) == ""
+
+
+# --- Uji clean_text (Pemrosesan Teks ala Bob) --------------------------------
+
+
+def test_clean_text_remove_hyphens():
+    from pinux.capture.capturer import clean_text
+
+    raw = "This is a trans-\n  lation example and con-\ntinue."
+    cleaned = clean_text(raw, unwrap_lines=False, remove_hyphens=True, remove_comments=False)
+    assert cleaned == "This is a translation example and continue."
+
+
+def test_clean_text_unwrap_lines():
+    from pinux.capture.capturer import clean_text
+
+    raw = "Line one\nline two is here.\n\nParagraph two\nsecond line."
+    cleaned = clean_text(raw, unwrap_lines=True, remove_hyphens=False, remove_comments=False)
+    assert cleaned == "Line one line two is here.\n\nParagraph two second line."
+
+
+def test_clean_text_remove_comments():
+    from pinux.capture.capturer import clean_text
+
+    raw = "// This is single line comment\n# Python comment\n/* Block comment */\nNormal code line"
+    cleaned = clean_text(raw, unwrap_lines=False, remove_hyphens=False, remove_comments=True)
+    assert cleaned == "This is single line comment\nPython comment\nBlock comment\nNormal code line"
+
+
+def test_clean_text_all_combined():
+    from pinux.capture.capturer import clean_text
+
+    raw = "// The quick brown fox jumps o-\n// ver the lazy dog.\n\n// New paragraph."
+    cleaned = clean_text(raw, unwrap_lines=True, remove_hyphens=True, remove_comments=True)
+    assert cleaned == "The quick brown fox jumps over the lazy dog.\n\nNew paragraph."
+

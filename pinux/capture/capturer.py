@@ -26,6 +26,7 @@ __all__ = [
     "ClipboardBackend",
     "DesktopSessionType",
     "TextCapturer",
+    "clean_text",
     "detect_desktop_session",
     "truncate_text",
 ]
@@ -64,6 +65,57 @@ def detect_desktop_session() -> DesktopSessionType:
 
     # Default fallback aman
     return "wayland"
+
+
+def clean_text(
+    text: str,
+    *,
+    unwrap_lines: bool = False,
+    remove_hyphens: bool = False,
+    remove_comments: bool = False,
+) -> str:
+    """Bersihkan teks sumber menurut konfigurasi pemrosesan teks ala Bob.
+
+    - unwrap_lines: gabungkan baris terputus menjadi satu spasi (teks dari PDF).
+    - remove_hyphens: hapus pemisahan kata akibat pergantian baris ('con-\\nnection' -> 'connection').
+    - remove_comments: bersihkan penanda komentar baris seperti '#', '//', '/* */'.
+    """
+    if not text:
+        return ""
+
+    result = text
+
+    # 1. Hapus simbol komentar kode pemrograman lebih dulu agar tidak menghalangi deteksi kata/baris
+    if remove_comments:
+        import re
+        lines = result.splitlines()
+        cleaned_lines = []
+        for line in lines:
+            # Hapus komentar // dan #
+            l = re.sub(r"^\s*(//|#)\s*", "", line)
+            # Hapus komentar /* dan */
+            l = re.sub(r"^\s*/\*\s*", "", l)
+            l = re.sub(r"\s*\*/\s*$", "", l)
+            cleaned_lines.append(l)
+        result = "\n".join(cleaned_lines)
+
+    # 2. Hapus tanda hubung pergantian baris
+    if remove_hyphens:
+        import re
+        result = re.sub(r"(\w+)-\s*\n\s*(\w+)", r"\1\2", result)
+
+    # 3. Gabungkan baris (unwrap newlines)
+    if unwrap_lines:
+        # Gabungkan baris tunggal, tetapi pertahankan pemisah paragraf ganda (\n\n)
+        paragraphs = result.split("\n\n")
+        cleaned_paragraphs = []
+        for p in paragraphs:
+            cleaned = " ".join(line.strip() for line in p.splitlines() if line.strip())
+            if cleaned:
+                cleaned_paragraphs.append(cleaned)
+        result = "\n\n".join(cleaned_paragraphs)
+
+    return result.strip()
 
 
 def truncate_text(text: str, max_chars: int) -> tuple[str, bool]:

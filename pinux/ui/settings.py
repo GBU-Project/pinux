@@ -130,6 +130,43 @@ class SettingsWindow(Adw.PreferencesWindow):
         group.add(self._pin_default_row)
 
         page.add(group)
+
+        # Kelompok Pemrosesan Teks & Otomatisasi (ala Bob)
+        text_group = Adw.PreferencesGroup()
+        text_group.set_title("Pemrosesan Teks & Otomatisasi")
+        text_group.set_description(
+            "Optimasi teks sebelum diterjemahkan (berguna untuk PDF, kode sumber, atau OCR)."
+        )
+
+        self._unwrap_lines_row = Adw.SwitchRow()
+        self._unwrap_lines_row.set_title("Gabungkan Baris Terputus (Unwrap)")
+        self._unwrap_lines_row.set_subtitle("Menghapus pemisah baris tunggal di tengah paragraf (teks PDF/OCR)")
+        self._unwrap_lines_row.set_active(self._settings.text_processing.unwrap_lines)
+        self._unwrap_lines_row.connect("notify::active", self._on_text_processing_changed)
+        text_group.add(self._unwrap_lines_row)
+
+        self._remove_hyphens_row = Adw.SwitchRow()
+        self._remove_hyphens_row.set_title("Hapus Tanda Hubung Pergantian Baris")
+        self._remove_hyphens_row.set_subtitle("Menggabungkan kata yang terpotong tanda '-' di akhir baris")
+        self._remove_hyphens_row.set_active(self._settings.text_processing.remove_hyphens)
+        self._remove_hyphens_row.connect("notify::active", self._on_text_processing_changed)
+        text_group.add(self._remove_hyphens_row)
+
+        self._remove_comments_row = Adw.SwitchRow()
+        self._remove_comments_row.set_title("Hapus Simbol Komentar Kode")
+        self._remove_comments_row.set_subtitle("Membersihkan awalan komentar bahasa pemrograman (//, #, /* */)")
+        self._remove_comments_row.set_active(self._settings.text_processing.remove_comments)
+        self._remove_comments_row.connect("notify::active", self._on_text_processing_changed)
+        text_group.add(self._remove_comments_row)
+
+        self._auto_copy_result_row = Adw.SwitchRow()
+        self._auto_copy_result_row.set_title("Salin Otomatis Hasil Terjemahan")
+        self._auto_copy_result_row.set_subtitle("Menyalin hasil terjemahan langsung ke clipboard setelah selesai")
+        self._auto_copy_result_row.set_active(self._settings.text_processing.auto_copy_result)
+        self._auto_copy_result_row.connect("notify::active", self._on_text_processing_changed)
+        text_group.add(self._auto_copy_result_row)
+
+        page.add(text_group)
         self.add(page)
 
     # -- Halaman Provider -----------------------------------------------------
@@ -266,6 +303,14 @@ class SettingsWindow(Adw.PreferencesWindow):
         self._settings.fallback_language = self._fallback_lang_row.get_text()
         self._settings.max_chars = int(self._max_chars_row.get_value())
         self._settings.popup.pin_default = self._pin_default_row.get_active()
+
+        self._save_and_notify()
+
+    def _on_text_processing_changed(self, *args: Any) -> None:
+        self._settings.text_processing.unwrap_lines = self._unwrap_lines_row.get_active()
+        self._settings.text_processing.remove_hyphens = self._remove_hyphens_row.get_active()
+        self._settings.text_processing.remove_comments = self._remove_comments_row.get_active()
+        self._settings.text_processing.auto_copy_result = self._auto_copy_result_row.get_active()
 
         self._save_and_notify()
 
