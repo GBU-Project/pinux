@@ -10,16 +10,47 @@ disorot.
 
 > Status: tahap awal pengembangan. Lihat `tasklist.md` untuk kemajuan terkini.
 
-## Kebutuhan sistem
+## Instalasi via Flatpak (Universal & Direkomendasikan)
 
-Pinux memerlukan GTK 4.10+, libadwaita 1.4+, dan PyGObject dari distribusi.
-Tidak ada paket sistem lain yang diperlukan.
+Flatpak adalah cara instalasi termudah dan universal untuk semua distribusi Linux (Ubuntu, Fedora, Arch, Debian, openSUSE, dll.), baik di lingkungan sesi **Wayland** maupun **X11**.
 
+### 1. Pasang dari Berkas Rilis (`Pinux.flatpak`)
+
+Unduh berkas `Pinux.flatpak` dari [Halaman Rilis GitHub](https://github.com/GBU-Project/pinux/releases), lalu pasang:
+
+```bash
+flatpak install Pinux.flatpak
 ```
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+
+Jalankan Pinux:
+
+```bash
+flatpak run io.github.gbu_project.Pinux
 ```
 
-## Instalasi untuk pengembangan
+### 2. Pintasan Keyboard Desktop (Mode Flatpak)
+
+Jika portal pintasan global belum aktif otomatis di desktop Anda, Anda dapat mengaitkan tombol pintasan secara manual pada **Pengaturan Keyboard Desktop**:
+
+- **Penerjemahan Seleksi/Clipboard:** `flatpak run io.github.gbu_project.Pinux --trigger` (rekomendasi: `Ctrl+Alt+T`)
+- **Tangkapan Layar & OCR:** `flatpak run io.github.gbu_project.Pinux --pick-region` (rekomendasi: `Ctrl+Alt+O`)
+- **Terjemah Input Manual:** `flatpak run io.github.gbu_project.Pinux --input` (rekomendasi: `Ctrl+Alt+A`)
+- **OCR Senyap (Salin Teks Saja):** `flatpak run io.github.gbu_project.Pinux --ocr-copy` (rekomendasi: `Ctrl+Alt+C`)
+- **Jendela Pengaturan:** `flatpak run io.github.gbu_project.Pinux --settings`
+
+---
+
+## Kebutuhan Sistem (Instalasi Native / Pengembangan)
+
+Bila Anda ingin menjalankan Pinux secara native tanpa Flatpak:
+
+Pinux memerlukan Python 3.11+, GTK 4.10+, libadwaita 1.4+, dan PyGObject dari distribusi:
+
+```bash
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 wl-clipboard
+```
+
+## Instalasi untuk Pengembangan (Source)
 
 ```
 python3 -m venv --system-site-packages --without-pip .venv
