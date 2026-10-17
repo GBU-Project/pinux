@@ -453,12 +453,28 @@ class PinuxApp(Adw.Application):
             self._popup_window = PopupWindow(
                 on_text_changed=lambda t: self.trigger_router._execute_translation(t),
                 on_swap_languages=lambda: self._on_swap_languages(),
+                on_language_selected=lambda s, t: self._on_language_changed(s, t),
                 on_copy_result=lambda res: self.text_capturer.send_to_clipboard(res),
                 on_trigger_ocr=lambda: self.trigger_router.request_ocr(),
                 pin_default=self.settings.popup.pin_default,
                 width=self.settings.popup.width,
             )
+            # Setel bahasa awal sesuai pengaturan
+            self._popup_window.set_languages_display("auto", self.settings.target_language)
         return self._popup_window
+
+    def _on_language_changed(self, source_lang: str | None, target_lang: str) -> None:
+        """Picu penerjemahan ulang jika pengguna mengubah bahasa dari dropdown popup."""
+        self.settings.target_language = target_lang
+        if self._popup_window is None:
+            return
+        text = self._popup_window.source_text.strip()
+        if text:
+            self.trigger_router._execute_translation(
+                text,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
 
     def _on_swap_languages(self) -> None:
         """Tukar bahasa sumber & target dan terjemahkan kembali hasil terjemahan jika ada."""

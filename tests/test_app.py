@@ -145,6 +145,25 @@ def test_pinux_app_swap_languages(tmp_path: Path) -> None:
         assert executed_calls[0] == ("Halo dunia", "id", "en")
 
 
+def test_app_on_language_changed() -> None:
+    app = PinuxApp.__new__(PinuxApp)
+    app.settings = Settings()
+    app.settings.target_language = "id"
+    app.trigger_router = MagicMock()
+
+    mock_popup = MagicMock()
+    mock_popup.source_text = "Testing sentence"
+    app._popup_window = mock_popup
+
+    app._on_language_changed("en", "ja")
+    assert app.settings.target_language == "ja"
+    app.trigger_router._execute_translation.assert_called_once_with(
+        "Testing sentence",
+        source_lang="en",
+        target_lang="ja",
+    )
+
+
 
 
 def test_request_ocr_uses_frozen_frame_picker() -> None:

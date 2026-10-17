@@ -49,13 +49,31 @@ class PopupWindow(Gtk.Window):
     """Jendela popup terjemahan GTK4."""
 
     #: Jeda (ms) setelah ketukan terakhir sebelum terjemahan dikirim.
-    DEBOUNCE_MS = 500
+    LANGUAGES: list[tuple[str, str]] = [
+        ("auto", "Otomatis"),
+        ("id", "Indonesia"),
+        ("en", "Inggris"),
+        ("ja", "Jepang"),
+        ("zh", "Mandarin"),
+        ("ar", "Arab"),
+        ("de", "Jerman"),
+        ("es", "Spanyol"),
+        ("fr", "Prancis"),
+        ("ko", "Korea"),
+        ("ru", "Rusia"),
+        ("pt", "Portugis"),
+        ("it", "Italia"),
+        ("nl", "Belanda"),
+        ("vi", "Vietnam"),
+        ("th", "Thailand"),
+    ]
 
     def __init__(
         self,
         *,
         on_text_changed: Callable[[str], None] | None = None,
         on_swap_languages: Callable[[], None] | None = None,
+        on_language_selected: Callable[[str | None, str], None] | None = None,
         on_copy_result: Callable[[str], None] | None = None,
         on_trigger_ocr: Callable[[], None] | None = None,
         pin_default: bool = False,
@@ -65,13 +83,17 @@ class PopupWindow(Gtk.Window):
 
         self._on_text_changed = on_text_changed
         self._on_swap_languages = on_swap_languages
+        self._on_language_selected = on_language_selected
         self._on_copy_result = on_copy_result
         self._on_trigger_ocr = on_trigger_ocr
 
         self._pinned: bool = pin_default
         self._ignore_text_changes: bool = False
+        self._ignore_lang_changes: bool = False
         self._debounce_id: int | None = None
         self._current_result_text: str = ""
+        self._current_source_lang: str | None = None
+        self._current_target_lang: str = "id"
 
         # Pengaturan jendela
         self.set_decorated(False)
@@ -114,17 +136,35 @@ class PopupWindow(Gtk.Window):
         # Baris Header / Kontrol
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        self._lang_label = Gtk.Label(label="auto → id")
-        self._lang_label.set_xalign(0.0)
-        self._lang_label.set_hexpand(True)
-        self._lang_label.add_css_class("dim-label")
-        header_box.append(self._lang_label)
+        # Dropdown Bahasa Sumber ala Bob
+        src_labels = [name for _, name in self.LANGUAGES]
+        self._src_dropdown = Gtk.DropDown.new_from_strings(src_labels)
+        self._src_dropdown.set_selected(0)  # auto
+        self._src_dropdown.set_tooltip_text("Bahasa Sumber")
+        self._src_dropdown.connect("notify::selected", self._on_src_lang_changed)
+        header_box.append(self._src_dropdown)
 
         # Tombol Tukar Bahasa
         self._swap_button = Gtk.Button(icon_name="view-refresh-symbolic")
         self._swap_button.set_tooltip_text("Tukar bahasa sumber & tujuan")
         self._swap_button.connect("clicked", self._on_swap_clicked)
         header_box.append(self._swap_button)
+
+        # Dropdown Bahasa Tujuan ala Bob (tanpa 'auto')
+        self._target_languages = [lang for lang in self.LANGUAGES if lang[0] != "auto"]
+        tgt_labels = [name for _, name in self._target_languages]
+        self._tgt_dropdown = Gtk.DropDown.new_from_strings(tgt_labels)
+        self._tgt_dropdown.set_selected(0)  # id
+        self._tgt_dropdown.set_tooltip_text("Bahasa Tujuan")
+        self._tgt_dropdown.connect("notify::selected", self._on_tgt_lang_changed)
+        header_box.append(self._tgt_dropdown)
+
+        # Label status / deteksi otomatis / spacer expander
+        self._lang_label = Gtk.Label(label="")
+        self._lang_label.set_xalign(0.0)
+        self._lang_label.set_hexpand(True)
+        self._lang_label.add_css_class("dim-label")
+        header_box.append(self._lang_label)
 
         # Tombol OCR
         self._ocr_button = Gtk.Button(icon_name="camera-photo-symbolic")
@@ -292,9 +332,55 @@ class PopupWindow(Gtk.Window):
         finally:
             self._ignore_text_changes = False
 
+    def _on_src_lang_changed(self, dropdown: Gtk.DropDown, pspec: Any) -> None:
+        if self._ignore_lang_changes:
+            return
+        idx = dropdown.get_selected()
+        code = self.LANGUAGES[idx][0] if 0 <= idx < len(self.LANGUAGES) else "auto"
+        self._current_source_lang = None if code == "auto" else code
+        if self._on_language_selected is not None:
+            self._on_language_selected(self._current_source_lang, self._current_target_lang)
+
+    def _on_tgt_lang_changed(self, dropdown: Gtk.DropDown, pspec: Any) -> None:
+        if self._ignore_lang_changes:
+            return
+        idx = dropdown.get_selected()
+        code = self._target_languages[idx][0] if 0 <= idx < len(self._target_languages) else "id"
+        self._current_target_lang = code
+        if self._on_language_selected is not None:
+            self._on_language_selected(self._current_source_lang, self._current_target_lang)
+
     def set_languages_display(self, source: str, target: str) -> None:
-        """Perbarui label bahasa aktif (misal: 'id → en')."""
-        self._lang_label.set_text(f"{source} → {target}")
+        """Perbarui dropdown dan label bahasa aktif (misal: 'id → en')."""
+        self._ignore_lang_changes = True
+        try:
+            # Cari dan pilih indeks sumber
+            src_code = source.lower()
+            src_idx = 0  # auto default
+            for i, (code, _) in enumerate(self.LANGUAGES):
+                if code.lower() == src_code:
+                    src_idx = i
+                    break
+            self._src_dropdown.set_selected(src_idx)
+            self._current_source_lang = None if self.LANGUAGES[src_idx][0] == "auto" else self.LANGUAGES[src_idx][0]
+
+            # Cari dan pilih indeks target
+            tgt_code = target.lower()
+            tgt_idx = 0
+            for i, (code, _) in enumerate(self._target_languages):
+                if code.lower() == tgt_code:
+                    tgt_idx = i
+                    break
+            self._tgt_dropdown.set_selected(tgt_idx)
+            self._current_target_lang = self._target_languages[tgt_idx][0]
+
+            # Tampilkan info jika bahasa terdeteksi otomatis
+            if src_idx == 0 and source and source != "auto":
+                self._lang_label.set_text(f"({source})")
+            else:
+                self._lang_label.set_text("")
+        finally:
+            self._ignore_lang_changes = False
 
     def show_loading(self) -> None:
         """Tampilkan spinner dan bersihkan label pesan galat (R5.5)."""

@@ -164,3 +164,24 @@ def test_popup_window_actions() -> None:
 
     popup._copy_button.emit("clicked")
     assert copied_text == "Hasil Terjemah"
+
+
+def test_popup_window_language_selection() -> None:
+    selected_source = None
+    selected_target = None
+
+    def on_lang(src: str | None, tgt: str) -> None:
+        nonlocal selected_source, selected_target
+        selected_source = src
+        selected_target = tgt
+
+    popup = PopupWindow(on_language_selected=on_lang)
+    popup.set_languages_display("en", "id")
+
+    # Pilih bahasa target ke 'en' (indeks 1 pada target_languages)
+    popup._tgt_dropdown.set_selected(1)
+    assert selected_target == "en"
+
+    # Pilih bahasa sumber ke 'ja' (indeks 3 pada LANGUAGES: auto=0, id=1, en=2, ja=3)
+    popup._src_dropdown.set_selected(3)
+    assert selected_source == "ja"

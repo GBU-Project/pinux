@@ -29,6 +29,7 @@ from pinux.config import ProviderEntry
 from pinux.credentials import CredentialStore
 from pinux.translate.base import TranslationProvider
 from pinux.translate.google_free import GoogleFreeProvider
+from pinux.translate.openai_compatible import OpenAICompatibleProvider
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -93,6 +94,7 @@ class ProviderRegistry:
 
         # Daftarkan provider bawaan
         self.register(GoogleFreeProvider())
+        self.register(OpenAICompatibleProvider())
 
     @property
     def warnings(self) -> tuple[str, ...]:

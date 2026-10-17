@@ -71,10 +71,13 @@ def test_load_provider_from_string_class_not_found() -> None:
 # --- Uji ProviderRegistry Dasar & Ketersediaan -------------------------------
 
 
-def test_registry_has_google_free_by_default() -> None:
+def test_registry_has_defaults() -> None:
     reg = ProviderRegistry()
     assert reg.get("google-free") is not None
     assert reg.is_available("google-free") is True
+
+    assert reg.get("openai") is not None
+    assert reg.get("openai").requires_credential() is True
 
     info = reg.get_info("google-free")
     assert info is not None
