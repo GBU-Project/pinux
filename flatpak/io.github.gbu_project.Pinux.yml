@@ -19,7 +19,7 @@ finish-args:
 
   # Dukungan Tray Icon (StatusNotifierItem & D-Bus Menu)
   - --talk-name=org.kde.StatusNotifierWatcher
-  - --own-name=org.kde.StatusNotifierItem-*
+  - --own-name=org.kde.StatusNotifierItem.*
 
   # Text-to-speech (speech-dispatcher di host)
   - --socket=speech-dispatcher
