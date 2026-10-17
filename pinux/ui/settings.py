@@ -195,14 +195,29 @@ class SettingsWindow(Adw.PreferencesWindow):
             row.add_prefix(check)
 
             # Jika provider butuh kredensial (R3.7)
-            if p.requires_credential():
+            if p.id == "openai":
+                # Endpoint & model dapat diubah (Ollama, LM Studio, OpenAI, dll.)
+                group.add(row)
+                self._llm_endpoint_row = Adw.EntryRow()
+                self._llm_endpoint_row.set_title("Endpoint (…/v1/chat/completions)")
+                self._llm_endpoint_row.set_text(self._settings.llm.endpoint_url)
+                self._llm_endpoint_row.connect("changed", self._on_llm_changed)
+                group.add(self._llm_endpoint_row)
+                self._llm_model_row = Adw.EntryRow()
+                self._llm_model_row.set_title("Model")
+                self._llm_model_row.set_text(self._settings.llm.model)
+                self._llm_model_row.connect("changed", self._on_llm_changed)
+                group.add(self._llm_model_row)
+
+            if p.requires_credential() or p.id == "openai":
                 cred_row = Adw.PasswordEntryRow()
                 cred_row.set_title(f"API Key ({p.display_name})")
                 current_cred = self._credential_store.get(p.id) or ""
                 cred_row.set_text(current_cred)
                 cred_row.connect("changed", lambda entry, pid=p.id: self._on_credential_changed(entry, pid))
 
-                group.add(row)
+                if p.id != "openai":
+                    group.add(row)
                 group.add(cred_row)
                 self._cred_entries[p.id] = cred_row
             else:
@@ -211,28 +226,6 @@ class SettingsWindow(Adw.PreferencesWindow):
             self._provider_rows[p.id] = row
 
         page.add(group)
-
-        # Pengaturan model & endpoint untuk LLM / OpenAI-compatible
-        llm_group = Adw.PreferencesGroup()
-        llm_group.set_title("Konfigurasi LLM (OpenAI / Ollama)")
-        llm_group.set_description(
-            "Gunakan endpoint lokal (seperti Ollama http://localhost:11434/v1/chat/completions) "
-            "atau API cloud OpenAI."
-        )
-
-        self._llm_endpoint_row = Adw.EntryRow()
-        self._llm_endpoint_row.set_title("Endpoint URL")
-        self._llm_endpoint_row.set_text(self._settings.llm.endpoint_url)
-        self._llm_endpoint_row.connect("changed", self._on_llm_changed)
-        llm_group.add(self._llm_endpoint_row)
-
-        self._llm_model_row = Adw.EntryRow()
-        self._llm_model_row.set_title("Nama Model")
-        self._llm_model_row.set_text(self._settings.llm.model)
-        self._llm_model_row.connect("changed", self._on_llm_changed)
-        llm_group.add(self._llm_model_row)
-
-        page.add(llm_group)
         self.add(page)
 
     # -- Halaman Pintasan -----------------------------------------------------
@@ -337,10 +330,13 @@ class SettingsWindow(Adw.PreferencesWindow):
         self._save_and_notify()
 
     def _on_llm_changed(self, *args: Any) -> None:
-        self._settings.llm.endpoint_url = self._llm_endpoint_row.get_text()
-        self._settings.llm.model = self._llm_model_row.get_text()
-
-        self._save_and_notify()
+        endpoint = self._llm_endpoint_row.get_text().strip()
+        model = self._llm_model_row.get_text().strip()
+        # Simpan hanya bila valid; kolom kosong/setengah diketik tidak menimpa.
+        if endpoint.startswith(("http://", "https://")) and model:
+            self._settings.llm.endpoint_url = endpoint
+            self._settings.llm.model = model
+            self._save_and_notify()
 
     def _on_provider_selected(self, btn: Gtk.CheckButton, provider_id: str) -> None:
         if btn.get_active():
