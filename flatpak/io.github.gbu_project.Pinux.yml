@@ -1,0 +1,80 @@
+app-id: io.github.gbu_project.Pinux
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: pinux
+
+finish-args:
+  # Display & Windowing (Mendukung Wayland & X11 secara mulus)
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+
+  # Akses Jaringan (Untuk Google Translate & OpenAI API)
+  - --share=network
+
+  # XDG Desktop Portal (Global Shortcuts, Screenshot, Secret Service, Clipboard)
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --talk-name=org.freedesktop.secrets
+
+  # Dukungan Tray Icon (StatusNotifierItem & D-Bus Menu)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.kde.StatusNotifierItem-*
+
+  # Akses ke Ollama / Local LLM di host (localhost / 127.0.0.1)
+  # (Flatpak sandbox secara default mengizinkan koneksi loopback saat network aktif)
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/pkgconfig
+  - /share/man
+  - '*.la'
+  - '*.a'
+
+modules:
+  # Pustaka Python tambahan untuk Pinux & RapidOCR
+  - name: python3-pillow
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-build-isolation --no-deps --prefix=/app Pillow
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/source/p/pillow/pillow-11.1.0.tar.gz
+        sha256: 2207b7381258525b6a50db8161730d10b0eb13e0c451558bfeb14ca10543e4be
+
+  - name: python3-dbus
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-build-isolation --no-deps --prefix=/app dbus-python
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/source/d/dbus-python/dbus-python-1.3.2.tar.gz
+        sha256: ad6781930861884f9c866ad9d1b7352f95a639c43b950005704a29a0f443e061
+
+  # Modul Utama: Pinux
+  - name: pinux
+    buildsystem: simple
+    build-commands:
+      # Pasang paket Pinux ke direktori /app
+      - pip3 install --no-build-isolation --no-deps --prefix=/app .
+
+      # Pasang Desktop file
+      - install -Dm644 data/io.github.gbu_project.Pinux.desktop /app/share/applications/io.github.gbu_project.Pinux.desktop
+
+      # Pasang AppStream Metainfo
+      - install -Dm644 data/io.github.gbu_project.Pinux.metainfo.xml /app/share/metainfo/io.github.gbu_project.Pinux.metainfo.xml
+
+      # Pasang Ikon Hicolor (SVG scalable dan ukuran PNG)
+      - install -Dm644 data/icons/pinux.svg /app/share/icons/hicolor/scalable/apps/io.github.gbu_project.Pinux.svg
+      - install -Dm644 data/icons/hicolor/16x16/apps/pinux.png /app/share/icons/hicolor/16x16/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/24x24/apps/pinux.png /app/share/icons/hicolor/24x24/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/32x32/apps/pinux.png /app/share/icons/hicolor/32x32/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/48x48/apps/pinux.png /app/share/icons/hicolor/48x48/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/64x64/apps/pinux.png /app/share/icons/hicolor/64x64/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/128x128/apps/pinux.png /app/share/icons/hicolor/128x128/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/256x256/apps/pinux.png /app/share/icons/hicolor/256x256/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/512x512/apps/pinux.png /app/share/icons/hicolor/512x512/apps/io.github.gbu_project.Pinux.png
+    sources:
+      - type: dir
+        path: ..

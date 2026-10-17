@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.gbu_project.Pinux</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Pinux</name>
+  <summary>Penerjemah popup dan OCR desktop ala Bob untuk Linux</summary>
+  <description>
+    <p>
+      Pinux adalah aplikasi penerjemah desktop modern berbasis GTK4 dan Libadwaita yang mengadaptasi alur kerja Bob (macOS) ke ekosistem Linux.
+    </p>
+    <p>
+      Fitur Utama:
+    </p>
+    <ul>
+      <li>Penerjemahan Teks Cepat: Terjemahkan teks yang disorot dengan satu pintasan keyboard global.</li>
+      <li>Tangkapan Layar &amp; OCR: Seleksi area layar mana pun dan terjemahkan teks dalam gambar secara instan.</li>
+      <li>Dukungan Provider Luas: Google Translate (Gratis), OpenAI, DeepSeek, atau LLM lokal (Ollama / LM Studio) tanpa memerlukan API key eksternal.</li>
+      <li>Pemrosesan Teks Otomatis: Penggabungan baris terputus PDF/OCR, pembersihan komentar kode, dan CJK-aware unwrapping.</li>
+      <li>Integrasi Desktop Modern: Mendukung sesi Wayland dan X11 secara mulus via XDG Desktop Portal.</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.gbu_project.Pinux.desktop</launchable>
+  <url type="homepage">https://github.com/GBU-Project/pinux</url>
+  <url type="bugtracker">https://github.com/GBU-Project/pinux/issues</url>
+  <developer_name>GBU Project</developer_name>
+  <provides>
+    <binary>pinux</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-17">
+      <description>
+        <p>Rilis perdana Pinux dengan dukungan terjemahan popup, OCR RapidOCR, integrasi LLM lokal, dan pemrosesan teks.</p>
+      </description>
+    </release>
+  </releases>
+</component>

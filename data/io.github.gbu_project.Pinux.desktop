@@ -1,0 +1,30 @@
+[Desktop Entry]
+Name=Pinux
+Comment=Penerjemah popup dan OCR desktop ala Bob untuk Linux
+Exec=pinux
+Icon=io.github.gbu_project.Pinux
+Terminal=false
+Type=Application
+Categories=Utility;Translation;TextTools;
+StartupNotify=true
+Actions=trigger;input;pick-region;ocr-copy;settings;
+
+[Desktop Action trigger]
+Name=Terjemahkan Seleksi / Clipboard
+Exec=pinux --trigger
+
+[Desktop Action input]
+Name=Terjemah Input
+Exec=pinux --input
+
+[Desktop Action pick-region]
+Name=Tangkapan Layar & OCR
+Exec=pinux --pick-region
+
+[Desktop Action ocr-copy]
+Name=OCR Senyap (Salin Teks)
+Exec=pinux --ocr-copy
+
+[Desktop Action settings]
+Name=Pengaturan
+Exec=pinux --settings
