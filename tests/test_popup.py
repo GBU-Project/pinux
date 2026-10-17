@@ -58,6 +58,17 @@ def test_popup_window_focus_loss_behavior() -> None:
         popup._on_is_active_changed(popup, None)
         assert hide_called is True
 
+    # Ketika tidak aktif tetapi popover dropdown sedang terbuka -> TIDAK tertutup
+    popup.pinned = False
+    with pytest.MonkeyPatch.context() as mp:
+        hide_called = False
+        mp.setattr(popup, "hide", lambda: setattr(popup, "_test_hidden", True))
+        mp.setattr(popup, "is_active", lambda: False)
+        mp.setattr(popup, "_has_open_popover", lambda: True)
+
+        popup._on_is_active_changed(popup, None)
+        assert getattr(popup, "_test_hidden", False) is False
+
     # Ketika pinned=True, kehilangan fokus TIDAK menutup jendela (R5.6)
     popup.pinned = True
     with pytest.MonkeyPatch.context() as mp:

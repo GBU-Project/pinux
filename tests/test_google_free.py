@@ -231,3 +231,35 @@ def test_property_error_mapping_always_yields_valid_translation_error(
         assert exc_info.value.kind in ERROR_KINDS
         assert exc_info.value.provider_id == "google-free"
         assert len(exc_info.value.message) > 0
+
+
+def test_429_retry_waits_then_raises_rate_limit_error():
+    """Regresi: jeda retry (retry_delay_s > 0) tidak boleh melempar NameError."""
+    import threading
+    import time as _time
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    hits: list[float] = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            hits.append(_time.monotonic())
+            self.send_response(429)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        provider = GoogleFreeProvider(
+            base_url=f"http://127.0.0.1:{srv.server_port}/x", retry_delay_s=0.1
+        )
+        with pytest.raises(TranslationError) as err:
+            provider.translate(TranslationRequest(text="hi", source_lang=None, target_lang="id"))
+    finally:
+        srv.shutdown()
+    assert err.value.kind == "rate_limit"
+    assert len(hits) == 2 and hits[1] - hits[0] >= 0.09

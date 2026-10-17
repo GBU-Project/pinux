@@ -23,6 +23,7 @@ from typing import Final, Literal
 
 import dbus
 
+from pinux import APP_ID
 from pinux.portal.request import portal_request
 
 __all__ = [
@@ -109,14 +110,11 @@ class GlobalShortcutsPortal:
             bus = self._get_bus()
             portal = bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
             registry = dbus.Interface(portal, HOST_REGISTRY_INTERFACE)
-            # Coba daftarkan pinux atau org.pinux.Pinux
+            # Di luar Flatpak, app_id harus cocok dengan nama desktop file.
             try:
-                registry.Register("pinux", {})
+                registry.Register(APP_ID, {})
             except Exception:
-                try:
-                    registry.Register("org.pinux.Pinux", {})
-                except Exception:
-                    pass
+                pass
         except Exception:
             pass
 

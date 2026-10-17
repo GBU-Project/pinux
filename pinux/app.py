@@ -27,6 +27,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
+from pinux import APP_ID
 from pinux.capture.capturer import TextCapturer, clean_text
 from pinux.config import Settings
 from pinux.configstore import ConfigStore
@@ -36,6 +37,7 @@ from pinux.portal.screenshot import ScreenshotPortal
 from pinux.portal.shortcuts import ShortcutManager, ShortcutSpec, specs_from_settings
 from pinux.scheduler import RequestScheduler
 from pinux.translate.base import TranslationRequest
+from pinux.tts import TtsEngine
 from pinux.translate.registry import ProviderRegistry
 from pinux.tray import TrayItem
 from pinux.ui.popup import PopupWindow
@@ -139,7 +141,8 @@ class TriggerRouter:
                 GLib.idle_add(lambda: on_text(ocr_text))
             except Exception as exc:
                 logger.error(f"Kegagalan alur OCR: {exc}")
-                GLib.idle_add(lambda: popup.show_error(f"Galat OCR: {exc}"))
+                message = f"Galat OCR: {exc}"
+                GLib.idle_add(lambda: popup.show_error(message))
 
         import threading
         threading.Thread(target=_bg, daemon=True).start()
@@ -203,6 +206,18 @@ class TriggerRouter:
             )
             return
 
+        # Provider cadangan dicoba otomatis bila provider utama gagal; layanan
+        # tambahan (mode bandingkan) berjalan paralel dan hasilnya ditampilkan di popup.
+        active_provider = (
+            self.app.provider_registry.build_active(
+                provider.id,
+                settings.fallback_providers,
+                settings.compare_providers,
+                extra_timeout_s=settings.request_timeout_s,
+            )
+            or provider
+        )
+
         # Bahasa yang dipilih pengguna di dropdown popup berlaku untuk setiap terjemahan.
         if source_lang is None:
             source_lang = popup.source_lang
@@ -229,7 +244,7 @@ class TriggerRouter:
                 )
                 self.app.scheduler.submit(
                     fallback_req,
-                    provider,
+                    active_provider,
                     cred,
                     on_result=_on_final_result,
                     on_error=_on_error,
@@ -253,7 +268,7 @@ class TriggerRouter:
 
         self.app.scheduler.submit(
             req,
-            provider,
+            active_provider,
             cred,
             on_result=_on_result,
             on_error=_on_error,
@@ -277,7 +292,7 @@ class PinuxApp(Adw.Application):
         tray_item: TrayItem | None = None,
     ) -> None:
         super().__init__(
-            application_id="org.pinux.Pinux",
+            application_id=APP_ID,
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
         )
 
@@ -291,12 +306,16 @@ class PinuxApp(Adw.Application):
         self.text_capturer = text_capturer or TextCapturer()
         self.screenshot_portal = screenshot_portal or ScreenshotPortal()
         self.ocr_client = ocr_client or OcrWorkerClient()
+        self.tts = TtsEngine()
 
         self.settings: Settings = self.config_store.load()
         # Muat provider pihak ketiga dari berkas pengaturan
         self.provider_registry.load_from_entries(self.settings.providers)
         self.provider_registry.apply_llm_settings(
             self.settings.llm.endpoint_url, self.settings.llm.model
+        )
+        self.provider_registry.apply_libretranslate_settings(
+            self.settings.libretranslate.endpoint_url
         )
         self.provider_registry.load_from_entry_points()
 
@@ -467,6 +486,9 @@ class PinuxApp(Adw.Application):
         self.provider_registry.apply_llm_settings(
             new_settings.llm.endpoint_url, new_settings.llm.model
         )
+        self.provider_registry.apply_libretranslate_settings(
+            new_settings.libretranslate.endpoint_url
+        )
         if self._popup_window is not None:
             self._popup_window.pinned = new_settings.popup.pin_default
 
@@ -480,6 +502,8 @@ class PinuxApp(Adw.Application):
                 on_retry=lambda: self._on_retry_translation(),
                 on_copy_result=lambda res: self.text_capturer.send_to_clipboard(res),
                 on_trigger_ocr=lambda: self.trigger_router.request_ocr(),
+                on_speak=lambda text, lang: self.tts.speak(text, lang),
+                tts_available=self.tts.available,
                 pin_default=self.settings.popup.pin_default,
                 width=self.settings.popup.width,
             )
@@ -573,5 +597,6 @@ class PinuxApp(Adw.Application):
 
     def quit_app(self) -> None:
         """Hentikan aplikasi."""
+        self.tts.stop()
         self.release()
         self.quit()

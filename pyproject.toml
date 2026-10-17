@@ -28,6 +28,7 @@ ocr = [
 dev = [
     "pytest>=8",
     "hypothesis>=6",
+    "pyflakes>=3",
 ]
 
 [project.scripts]

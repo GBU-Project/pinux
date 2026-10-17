@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 if TYPE_CHECKING:
     from pinux.config import Settings
@@ -66,8 +66,49 @@ class SettingsWindow(Adw.PreferencesWindow):
 
         self.set_title("Pengaturan Pinux")
         self.set_default_size(600, 520)
+        self.set_hide_on_close(True)
 
         self._build_pages()
+        self._setup_window_controls()
+
+    def _setup_window_controls(self) -> None:
+        """Tambahkan tombol tutup eksplisit pada header dan dukung tombol Escape."""
+        # Tombol Escape untuk menutup jendela
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(key_controller)
+
+        # Cari Adw.HeaderBar bawaan untuk menyematkan tombol tutup yang pasti terlihat
+        def _find_header(widget: Gtk.Widget) -> Adw.HeaderBar | None:
+            if isinstance(widget, Adw.HeaderBar):
+                return widget
+            child = widget.get_first_child()
+            while child:
+                found = _find_header(child)
+                if found:
+                    return found
+                child = child.get_next_sibling()
+            return None
+
+        header = _find_header(self)
+        if header is not None:
+            close_btn = Gtk.Button(icon_name="window-close-symbolic")
+            close_btn.set_tooltip_text("Tutup pengaturan (Esc)")
+            close_btn.add_css_class("flat")
+            close_btn.connect("clicked", lambda _: self.close())
+            header.pack_end(close_btn)
+
+    def _on_key_pressed(
+        self,
+        controller: Gtk.EventControllerKey,
+        keyval: int,
+        keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        if keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
 
     def _build_pages(self) -> None:
         self._build_general_page()
@@ -209,14 +250,22 @@ class SettingsWindow(Adw.PreferencesWindow):
                 self._llm_model_row.connect("changed", self._on_llm_changed)
                 group.add(self._llm_model_row)
 
-            if p.requires_credential() or p.id == "openai":
+            if p.id == "libretranslate":
+                group.add(row)
+                self._libre_endpoint_row = Adw.EntryRow()
+                self._libre_endpoint_row.set_title("Alamat instance LibreTranslate")
+                self._libre_endpoint_row.set_text(self._settings.libretranslate.endpoint_url)
+                self._libre_endpoint_row.connect("changed", self._on_libre_changed)
+                group.add(self._libre_endpoint_row)
+
+            if p.requires_credential() or p.id in ("openai", "libretranslate"):
                 cred_row = Adw.PasswordEntryRow()
                 cred_row.set_title(f"API Key ({p.display_name})")
                 current_cred = self._credential_store.get(p.id) or ""
                 cred_row.set_text(current_cred)
                 cred_row.connect("changed", lambda entry, pid=p.id: self._on_credential_changed(entry, pid))
 
-                if p.id != "openai":
+                if p.id not in ("openai", "libretranslate"):
                     group.add(row)
                 group.add(cred_row)
                 self._cred_entries[p.id] = cred_row
@@ -226,6 +275,32 @@ class SettingsWindow(Adw.PreferencesWindow):
             self._provider_rows[p.id] = row
 
         page.add(group)
+
+        fallback_group = Adw.PreferencesGroup()
+        fallback_group.set_title("Provider Cadangan")
+        fallback_group.set_description(
+            "Dicoba berurutan bila provider utama gagal (jaringan, kuota, atau kunci). "
+            "Tulis ID provider dipisah koma, mis. deepl, libretranslate."
+        )
+        self._fallback_row = Adw.EntryRow()
+        self._fallback_row.set_title("Urutan cadangan")
+        self._fallback_row.set_text(", ".join(self._settings.fallback_providers))
+        self._fallback_row.connect("changed", self._on_fallback_changed)
+        fallback_group.add(self._fallback_row)
+        page.add(fallback_group)
+
+        compare_group = Adw.PreferencesGroup()
+        compare_group.set_title("Bandingkan Layanan")
+        compare_group.set_description(
+            "Layanan tambahan yang hasilnya ditampilkan berdampingan di popup. "
+            "Tulis ID provider dipisah koma, mis. deepl, openai."
+        )
+        self._compare_row = Adw.EntryRow()
+        self._compare_row.set_title("Layanan tambahan")
+        self._compare_row.set_text(", ".join(self._settings.compare_providers))
+        self._compare_row.connect("changed", self._on_compare_changed)
+        compare_group.add(self._compare_row)
+        page.add(compare_group)
         self.add(page)
 
     # -- Halaman Pintasan -----------------------------------------------------
@@ -327,6 +402,22 @@ class SettingsWindow(Adw.PreferencesWindow):
         self._settings.text_processing.remove_comments = self._remove_comments_row.get_active()
         self._settings.text_processing.auto_copy_result = self._auto_copy_result_row.get_active()
 
+        self._save_and_notify()
+
+    def _on_libre_changed(self, *args: Any) -> None:
+        url = self._libre_endpoint_row.get_text().strip()
+        if url.startswith(("http://", "https://")):
+            self._settings.libretranslate.endpoint_url = url
+            self._save_and_notify()
+
+    def _on_fallback_changed(self, *args: Any) -> None:
+        ids = [i.strip() for i in self._fallback_row.get_text().split(",") if i.strip()]
+        self._settings.fallback_providers = list(dict.fromkeys(ids))
+        self._save_and_notify()
+
+    def _on_compare_changed(self, *args: Any) -> None:
+        ids = [i.strip() for i in self._compare_row.get_text().split(",") if i.strip()]
+        self._settings.compare_providers = list(dict.fromkeys(ids))
         self._save_and_notify()
 
     def _on_llm_changed(self, *args: Any) -> None:

@@ -17,7 +17,7 @@ Perujuk: R1.4, R1.5, R2.4, R4.3, R5.1, R5.2, R5.3, R5.4, R5.5, R5.6.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import gi
@@ -77,6 +77,8 @@ class PopupWindow(Gtk.Window):
         on_retry: Callable[[], None] | None = None,
         on_copy_result: Callable[[str], None] | None = None,
         on_trigger_ocr: Callable[[], None] | None = None,
+        on_speak: Callable[[str, str | None], None] | None = None,
+        tts_available: bool = False,
         pin_default: bool = False,
         width: int = 420,
     ) -> None:
@@ -88,6 +90,9 @@ class PopupWindow(Gtk.Window):
         self._on_retry = on_retry
         self._on_copy_result = on_copy_result
         self._on_trigger_ocr = on_trigger_ocr
+        self._on_speak = on_speak
+        self._tts_available = tts_available
+        self._detected_lang: str | None = None
 
         self._pinned: bool = pin_default
         self._ignore_text_changes: bool = False
@@ -174,6 +179,19 @@ class PopupWindow(Gtk.Window):
         self._ocr_button.connect("clicked", self._on_ocr_clicked)
         header_box.append(self._ocr_button)
 
+        # Tombol suara (TTS): ucapkan teks sumber / hasil terjemahan
+        self._speak_source_button = Gtk.Button(icon_name="audio-speakers-symbolic")
+        self._speak_source_button.set_tooltip_text("Bacakan teks sumber")
+        self._speak_source_button.connect("clicked", self._on_speak_source_clicked)
+        self._speak_source_button.set_visible(self._tts_available)
+        header_box.append(self._speak_source_button)
+
+        self._speak_result_button = Gtk.Button(icon_name="audio-volume-high-symbolic")
+        self._speak_result_button.set_tooltip_text("Bacakan hasil terjemahan")
+        self._speak_result_button.connect("clicked", self._on_speak_result_clicked)
+        self._speak_result_button.set_visible(self._tts_available)
+        header_box.append(self._speak_result_button)
+
         # Tombol Salin
         self._copy_button = Gtk.Button(icon_name="edit-copy-symbolic")
         self._copy_button.set_tooltip_text("Salin hasil terjemahan (Ctrl+Shift+C)")
@@ -232,6 +250,11 @@ class PopupWindow(Gtk.Window):
         self._error_label.set_visible(False)
         main_box.append(self._error_label)
 
+        # Kontainer Layanan Tambahan (Mode Bandingkan)
+        self._alternatives_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._alternatives_box.set_visible(False)
+        main_box.append(self._alternatives_box)
+
         self.set_child(main_box)
 
     def _setup_events(self) -> None:
@@ -280,8 +303,26 @@ class PopupWindow(Gtk.Window):
 
         return False
 
+    def _has_open_popover(self, widget: Gtk.Widget | None = None) -> bool:
+        """Periksa apakah ada popover turunan (mis. dropdown menu) yang sedang terbuka."""
+        target = self if widget is None else widget
+        if isinstance(target, Gtk.Popover) and target.get_visible():
+            return True
+        child = target.get_first_child()
+        while child:
+            if self._has_open_popover(child):
+                return True
+            child = child.get_next_sibling()
+        return False
+
     def _on_is_active_changed(self, obj: Any, param: Any) -> None:
-        if not self.is_active() and not self._pinned:
+        if self._pinned:
+            return
+        if not self.is_active():
+            # Bila popover dropdown sedang terbuka, GTK memindahkan fokus ke popover.
+            # Jangan sembunyikan popup jika popover dropdown aktif.
+            if self._has_open_popover():
+                return
             self.hide()
 
     def _on_entry_key_pressed(
@@ -329,6 +370,15 @@ class PopupWindow(Gtk.Window):
     def _on_ocr_clicked(self, btn: Gtk.Button) -> None:
         if self._on_trigger_ocr is not None:
             self._on_trigger_ocr()
+
+    def _on_speak_source_clicked(self, btn: Gtk.Button) -> None:
+        text = self.source_text.strip()
+        if text and self._on_speak is not None:
+            self._on_speak(text, self._current_source_lang or self._detected_lang)
+
+    def _on_speak_result_clicked(self, btn: Gtk.Button) -> None:
+        if self._current_result_text and self._on_speak is not None:
+            self._on_speak(self._current_result_text, self._current_target_lang)
 
     def _on_copy_clicked(self, btn: Gtk.Button) -> None:
         if self._current_result_text and self._on_copy_result is not None:
@@ -425,12 +475,59 @@ class PopupWindow(Gtk.Window):
         finally:
             self._ignore_lang_changes = False
 
+    def _clear_alternatives(self) -> None:
+        """Hapus seluruh kartu hasil layanan tambahan dari kontainer."""
+        if hasattr(self, "_alternatives_box"):
+            while child := self._alternatives_box.get_first_child():
+                self._alternatives_box.remove(child)
+            self._alternatives_box.set_visible(False)
+
+    def _render_alternatives(self, alternatives: Sequence[Any]) -> None:
+        """Tampilkan kartu alternatif hasil layanan tambahan (mode bandingkan)."""
+        self._clear_alternatives()
+        if not alternatives or not hasattr(self, "_alternatives_box"):
+            return
+
+        for alt in alternatives:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            card.add_css_class("card")
+
+            # Header kartu: nama provider
+            header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            prov_name = alt.provider_display_name or alt.provider_id
+            title_lbl = Gtk.Label(label=prov_name)
+            title_lbl.add_css_class("caption")
+            title_lbl.add_css_class("dim-label")
+            title_lbl.set_xalign(0.0)
+            header_box.append(title_lbl)
+            card.append(header_box)
+
+            # Isi teks atau galat
+            if alt.error:
+                err_lbl = Gtk.Label(label=f"Gagal: {alt.error}")
+                err_lbl.add_css_class("caption")
+                err_lbl.add_css_class("error")
+                err_lbl.set_xalign(0.0)
+                err_lbl.set_wrap(True)
+                card.append(err_lbl)
+            else:
+                body_lbl = Gtk.Label(label=alt.text)
+                body_lbl.set_wrap(True)
+                body_lbl.set_selectable(True)
+                body_lbl.set_xalign(0.0)
+                card.append(body_lbl)
+
+            self._alternatives_box.append(card)
+
+        self._alternatives_box.set_visible(True)
+
     def show_loading(self) -> None:
         """Tampilkan spinner dan bersihkan label pesan galat (R5.5)."""
         self._spinner.set_visible(True)
         self._spinner.set_spinning(True)
         self._error_label.set_visible(False)
         self._error_label.set_text("")
+        self._clear_alternatives()
 
     def show_result(self, result: "TranslationResult") -> None:
         """Tampilkan hasil terjemahan dan hentikan indikator kemajuan (Properti 4)."""
@@ -439,13 +536,22 @@ class PopupWindow(Gtk.Window):
         self._error_label.set_visible(False)
 
         self._current_result_text = result.text
+        self._detected_lang = getattr(result, "detected_source_lang", None)
         self._result_label.set_text(result.text)
         self._result_label.set_visible(True)
+
+        # Tampilkan kartu alternatif bila mode bandingkan aktif
+        alternatives = getattr(result, "alternatives", ())
+        self._render_alternatives(alternatives)
+
+    # Alias agar kompatibel dengan pemanggilan _show_alternatives
+    _show_alternatives = _render_alternatives
 
     def show_error(self, message: str) -> None:
         """Tampilkan pesan galat dan hentikan indikator kemajuan (Properti 4)."""
         self._spinner.set_spinning(False)
         self._spinner.set_visible(False)
+        self._clear_alternatives()
 
         self._error_label.set_text(message)
         self._error_label.set_visible(True)

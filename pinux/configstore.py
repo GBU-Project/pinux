@@ -70,6 +70,9 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
         "ocr",
         "text_processing",
         "llm",
+        "libretranslate",
+        "fallback_providers",
+        "compare_providers",
         "providers",
     }
 )
@@ -150,6 +153,8 @@ def _toml_value(value: object) -> str:
         return str(value)
     if isinstance(value, float):
         return repr(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
     raise TypeError(f"Tipe nilai tidak dapat ditulis ke TOML: {type(value).__name__}")
 
 
@@ -168,6 +173,8 @@ def render_settings(settings: Settings) -> str:
         f"provider = {_toml_value(settings.provider)}",
         f"max_chars = {_toml_value(settings.max_chars)}",
         f"request_timeout_s = {_toml_value(settings.request_timeout_s)}",
+        f"fallback_providers = {_toml_value(list(settings.fallback_providers))}",
+        f"compare_providers = {_toml_value(list(settings.compare_providers))}",
         "",
         "[shortcuts]",
     ]
@@ -194,6 +201,9 @@ def render_settings(settings: Settings) -> str:
         "[llm]",
         f"endpoint_url = {_toml_value(settings.llm.endpoint_url)}",
         f"model = {_toml_value(settings.llm.model)}",
+        "",
+        "[libretranslate]",
+        f"endpoint_url = {_toml_value(settings.libretranslate.endpoint_url)}",
     ]
 
     for entry in settings.providers:
@@ -309,6 +319,26 @@ class ConfigStore:
         text_processing = document.get("text_processing")
         if text_processing is not None:
             self._read_text_processing(text_processing, settings.text_processing)
+
+        for key in ("fallback_providers", "compare_providers"):
+            values = document.get(key)
+            if values is None:
+                continue
+            if isinstance(values, list) and all(isinstance(i, str) and i for i in values):
+                setattr(settings, key, list(dict.fromkeys(values)))
+            else:
+                self._warn(f"Nilai {key} harus berupa daftar teks; diabaikan")
+
+        libre = document.get("libretranslate")
+        if libre is not None:
+            if isinstance(libre, Mapping):
+                url = self._read_str(libre, "endpoint_url", settings.libretranslate.endpoint_url)
+                if url.startswith(("http://", "https://")):
+                    settings.libretranslate.endpoint_url = url
+                else:
+                    self._warn("Nilai libretranslate.endpoint_url harus diawali http:// atau https://")
+            else:
+                self._warn("Bagian [libretranslate] harus berupa tabel; diabaikan")
 
         llm = document.get("llm")
         if llm is not None:

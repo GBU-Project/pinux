@@ -21,6 +21,9 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   - --own-name=org.kde.StatusNotifierItem-*
 
+  # Text-to-speech (speech-dispatcher di host)
+  - --socket=speech-dispatcher
+
   # Akses ke Ollama / Local LLM di host (localhost / 127.0.0.1)
   # (Flatpak sandbox secara default mengizinkan koneksi loopback saat network aktif)
 
@@ -37,16 +40,17 @@ modules:
   - name: python3-pillow
     buildsystem: simple
     build-commands:
-      - pip3 install --no-build-isolation --no-deps --prefix=/app Pillow
+      - pip3 install --no-build-isolation --no-deps --no-index --find-links="file://${PWD}" --prefix=/app Pillow
     sources:
       - type: archive
         url: https://files.pythonhosted.org/packages/source/p/pillow/pillow-11.1.0.tar.gz
         sha256: 368da70808b36d73b4b390a8ffac11069f8a5c85f29eff1f1b01bcf3ef5b2a20
 
+  # dbus-python 1.3.x dirilis sebagai tarball autotools (bukan paket setuptools murni).
   - name: python3-dbus
-    buildsystem: simple
-    build-commands:
-      - pip3 install --no-build-isolation --no-deps --prefix=/app dbus-python
+    buildsystem: autotools
+    config-opts:
+      - PYTHON=/usr/bin/python3
     sources:
       - type: archive
         url: https://files.pythonhosted.org/packages/source/d/dbus-python/dbus-python-1.3.2.tar.gz
@@ -57,7 +61,7 @@ modules:
     buildsystem: simple
     build-commands:
       # Pasang paket Pinux ke direktori /app
-      - pip3 install --no-build-isolation --no-deps --prefix=/app .
+      - pip3 install --no-build-isolation --no-deps --no-index --prefix=/app .
 
       # Pasang Desktop file
       - install -Dm644 data/io.github.gbu_project.Pinux.desktop /app/share/applications/io.github.gbu_project.Pinux.desktop

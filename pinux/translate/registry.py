@@ -28,7 +28,11 @@ else:
 from pinux.config import ProviderEntry
 from pinux.credentials import CredentialStore
 from pinux.translate.base import TranslationProvider
+from pinux.translate.chain import FallbackChain
+from pinux.translate.compare import CompareProvider
+from pinux.translate.deepl import DeepLProvider
 from pinux.translate.google_free import GoogleFreeProvider
+from pinux.translate.libretranslate import LibreTranslateProvider
 from pinux.translate.openai_compatible import OpenAICompatibleProvider
 
 __all__ = [
@@ -95,6 +99,8 @@ class ProviderRegistry:
         # Daftarkan provider bawaan
         self.register(GoogleFreeProvider())
         self.register(OpenAICompatibleProvider())
+        self.register(LibreTranslateProvider())
+        self.register(DeepLProvider())
 
     def apply_llm_settings(self, endpoint_url: str, model: str) -> None:
         """Terapkan endpoint/model LLM dari pengaturan ke provider 'openai'."""
@@ -102,6 +108,65 @@ class ProviderRegistry:
         if isinstance(provider, OpenAICompatibleProvider):
             provider.endpoint_url = endpoint_url
             provider.model = model
+
+    def apply_libretranslate_settings(self, endpoint_url: str) -> None:
+        """Terapkan alamat instance LibreTranslate dari pengaturan."""
+        provider = self._providers.get(LibreTranslateProvider.id)
+        if isinstance(provider, LibreTranslateProvider):
+            provider.endpoint_url = endpoint_url
+
+    def build_chain(
+        self, primary_id: str, fallback_ids: Sequence[str]
+    ) -> TranslationProvider | None:
+        """Bangun provider utama beserta cadangannya.
+
+        Cadangan yang tidak terdaftar, duplikat, atau belum siap (tanpa kredensial)
+        dilewati. Mengembalikan provider utama apa adanya bila tidak ada cadangan.
+        """
+        primary = self.get(primary_id)
+        if primary is None:
+            return None
+        store = self._credential_store
+        members: list[tuple[TranslationProvider, str | None]] = [
+            (primary, store.get(primary.id) if store else None)
+        ]
+        seen = {primary.id}
+        for fid in fallback_ids:
+            if fid in seen:
+                continue
+            seen.add(fid)
+            candidate = self.get(fid)
+            if candidate is None or not self.is_available(candidate):
+                continue
+            members.append((candidate, store.get(candidate.id) if store else None))
+        return primary if len(members) == 1 else FallbackChain(members)
+
+    def build_active(
+        self,
+        primary_id: str,
+        fallback_ids: Sequence[str],
+        compare_ids: Sequence[str],
+        *,
+        extra_timeout_s: float = 15.0,
+    ) -> TranslationProvider | None:
+        """Provider aktif: rantai fallback, ditambah layanan bandingkan bila ada."""
+        base = self.build_chain(primary_id, fallback_ids)
+        if base is None:
+            return None
+        store = self._credential_store
+        extras: list[tuple[TranslationProvider, str | None]] = []
+        seen = {primary_id}
+        for cid in compare_ids:
+            if cid in seen:
+                continue
+            seen.add(cid)
+            candidate = self.get(cid)
+            if candidate is None or not self.is_available(candidate):
+                continue
+            extras.append((candidate, store.get(candidate.id) if store else None))
+        if not extras:
+            return base
+        return CompareProvider(base, extras, extra_timeout_s=extra_timeout_s)
 
     @property
     def warnings(self) -> tuple[str, ...]:

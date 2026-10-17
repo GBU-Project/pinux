@@ -15,6 +15,7 @@ from gi.repository import Adw, Gio, Gtk
 
 import pytest
 
+from pinux import APP_ID
 from pinux.app import PinuxApp, TriggerRouter
 from pinux.capture.base import CaptureResult
 from pinux.config import Settings
@@ -79,7 +80,7 @@ def test_pinux_app_singleton_and_options(tmp_path: Path) -> None:
         tray_item=MagicMock(),
     )
 
-    assert app.get_application_id() == "org.pinux.Pinux"
+    assert app.get_application_id() == APP_ID
     assert app.get_flags() & Gio.ApplicationFlags.HANDLES_COMMAND_LINE
 
 

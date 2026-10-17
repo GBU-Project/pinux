@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 __all__ = [
+    "LibreTranslateSettings",
     "LlmSettings",
     "OcrSettings",
     "PopupSettings",
@@ -65,6 +66,13 @@ class LlmSettings:
 
 
 @dataclass
+class LibreTranslateSettings:
+    """Alamat instance LibreTranslate (self-hosted atau publik)."""
+
+    endpoint_url: str = "http://localhost:5000"
+
+
+@dataclass
 class TextProcessingSettings:
     """Pengaturan pembersihan teks sebelum penerjemahan ala Bob."""
 
@@ -88,4 +96,9 @@ class Settings:
     ocr: OcrSettings = field(default_factory=OcrSettings)
     text_processing: TextProcessingSettings = field(default_factory=TextProcessingSettings)
     llm: LlmSettings = field(default_factory=LlmSettings)
+    libretranslate: LibreTranslateSettings = field(default_factory=LibreTranslateSettings)
+    #: Provider cadangan berurutan bila provider utama gagal (jaringan/kuota/kunci).
+    fallback_providers: list[str] = field(default_factory=list)
+    #: Layanan tambahan yang hasilnya ditampilkan berdampingan dengan provider utama.
+    compare_providers: list[str] = field(default_factory=list)
     providers: list[ProviderEntry] = field(default_factory=list)

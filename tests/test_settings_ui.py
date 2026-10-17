@@ -67,6 +67,12 @@ def test_settings_window_initialization(tmp_path: Path) -> None:
     reloaded = config_store.load()
     assert reloaded.target_language == "ja"
 
+    # Periksa hide_on_close aktif dan Escape dapat menutup jendela
+    assert win.get_hide_on_close() is True
+    from gi.repository import Gdk
+    handled = win._on_key_pressed(None, Gdk.KEY_Escape, 0, 0)
+    assert handled is True
+
 
 def test_settings_window_credentials_saving(tmp_path: Path) -> None:
     cfg_file = tmp_path / "pinux.toml"

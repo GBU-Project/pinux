@@ -16,6 +16,7 @@ from pinux.scheduler import CancelToken
 __all__ = [
     "ERROR_KINDS",
     "ErrorKind",
+    "AlternativeResult",
     "Language",
     "TranslationError",
     "TranslationProvider",
@@ -56,12 +57,24 @@ class TranslationRequest:
 
 
 @dataclass(frozen=True)
+class AlternativeResult:
+    """Hasil dari layanan tambahan pada mode bandingkan; ``error`` terisi bila gagal."""
+
+    provider_id: str
+    display_name: str
+    text: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class TranslationResult:
     """Hasil penerjemahan beserta Source_Language yang terdeteksi."""
 
     text: str
     detected_source_lang: str
     provider_id: str
+    #: Hasil layanan tambahan (mode bandingkan); kosong pada penggunaan biasa.
+    alternatives: tuple[AlternativeResult, ...] = ()
 
 
 class TranslationError(Exception):
