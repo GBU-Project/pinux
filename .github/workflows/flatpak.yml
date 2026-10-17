@@ -10,6 +10,8 @@ jobs:
   flatpak:
     name: "Build Flatpak Bundle"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     container:
       image: bilelmoussaoui/flatpak-github-actions:gnome-48
       options: --privileged
