@@ -71,6 +71,8 @@ def build_request_url(
         ("sl", source_lang if source_lang else "auto"),
         ("tl", target_lang),
         ("dt", "t"),
+        ("dt", "bd"),
+        ("dt", "rm"),
         ("q", text),
     ]
     query = urllib.parse.urlencode(params)
@@ -84,6 +86,8 @@ def parse_response(
     fallback_source_lang: str = "auto",
 ) -> TranslationResult:
     """Urai respons JSON dari Google Translate menjadi TranslationResult."""
+    from pinux.translate.base import DictionaryEntry
+
     try:
         data = json.loads(raw_json)
     except Exception as exc:
@@ -110,11 +114,26 @@ def parse_response(
         )
 
     translated_pieces: list[str] = []
+    phonetic_found: str = ""
     for seg in segments:
-        if isinstance(seg, list) and len(seg) > 0 and isinstance(seg[0], str):
-            translated_pieces.append(seg[0])
+        if isinstance(seg, list) and len(seg) > 0:
+            if isinstance(seg[0], str):
+                translated_pieces.append(seg[0])
+            # Fonetik/transliterasi Google sering ada di segmen terakhir seg[3]
+            if len(seg) > 3 and isinstance(seg[3], str) and seg[3].strip():
+                phonetic_found = seg[3].strip()
 
     full_translated_text = "".join(translated_pieces)
+
+    # Entri kamus (data[1]) untuk kata tunggal
+    dict_entries: list[DictionaryEntry] = []
+    if len(data) > 1 and isinstance(data[1], list):
+        for item in data[1]:
+            if isinstance(item, list) and len(item) >= 2:
+                pos = str(item[0]) if item[0] else ""
+                terms = tuple(str(t) for t in item[1] if isinstance(t, str)) if isinstance(item[1], list) else ()
+                if pos or terms:
+                    dict_entries.append(DictionaryEntry(part_of_speech=pos, terms=terms))
 
     # Deteksi bahasa sumber: biasanya ada di data[2] atau data[1] jika berupa string
     detected_lang = fallback_source_lang
@@ -127,7 +146,10 @@ def parse_response(
         text=full_translated_text,
         detected_source_lang=detected_lang,
         provider_id=provider_id,
+        phonetic=phonetic_found,
+        dictionary_entries=tuple(dict_entries),
     )
+
 
 
 class GoogleFreeProvider:

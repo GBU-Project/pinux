@@ -264,6 +264,19 @@ class PopupWindow(Gtk.Window):
         self._result_label.set_vexpand(True)
         main_box.append(self._result_label)
 
+        # Label Fonetik / Simbol Lafal (Kamus ala Bob)
+        self._phonetic_label = Gtk.Label(label="")
+        self._phonetic_label.set_xalign(0.0)
+        self._phonetic_label.add_css_class("caption")
+        self._phonetic_label.add_css_class("dim-label")
+        self._phonetic_label.set_visible(False)
+        main_box.append(self._phonetic_label)
+
+        # Kontainer Kamus Kata Tunggal (Part of speech & sinonim)
+        self._dict_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._dict_box.set_visible(False)
+        main_box.append(self._dict_box)
+
         # Label Galat
         self._error_label = Gtk.Label(label="")
         self._error_label.set_wrap(True)
@@ -276,6 +289,7 @@ class PopupWindow(Gtk.Window):
         self._alternatives_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._alternatives_box.set_visible(False)
         main_box.append(self._alternatives_box)
+
 
         self.set_child(main_box)
 
@@ -572,6 +586,55 @@ class PopupWindow(Gtk.Window):
 
         self._alternatives_box.set_visible(True)
 
+    def _clear_dictionary(self) -> None:
+        """Hapus entri kamus dan fonetik sebelumnya."""
+        if hasattr(self, "_phonetic_label"):
+            self._phonetic_label.set_text("")
+            self._phonetic_label.set_visible(False)
+        if hasattr(self, "_dict_box"):
+            while child := self._dict_box.get_first_child():
+                self._dict_box.remove(child)
+            self._dict_box.set_visible(False)
+
+    def _render_dictionary(self, phonetic: str, entries: Sequence[Any]) -> None:
+        """Tampilkan fonetik dan daftar kelas kata/sinonim kamus."""
+        self._clear_dictionary()
+        has_content = False
+
+        if phonetic and hasattr(self, "_phonetic_label"):
+            self._phonetic_label.set_text(f"[{phonetic}]")
+            self._phonetic_label.set_visible(True)
+            has_content = True
+
+        if entries and hasattr(self, "_dict_box"):
+            for entry in entries:
+                pos = getattr(entry, "part_of_speech", "")
+                terms = getattr(entry, "terms", ())
+                if not pos and not terms:
+                    continue
+
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                if pos:
+                    pos_lbl = Gtk.Label(label=pos)
+                    pos_lbl.add_css_class("caption")
+                    pos_lbl.add_css_class("accent")
+                    pos_lbl.set_xalign(0.0)
+                    row.append(pos_lbl)
+
+                if terms:
+                    terms_lbl = Gtk.Label(label=", ".join(terms))
+                    terms_lbl.add_css_class("caption")
+                    terms_lbl.add_css_class("dim-label")
+                    terms_lbl.set_wrap(True)
+                    terms_lbl.set_xalign(0.0)
+                    terms_lbl.set_hexpand(True)
+                    row.append(terms_lbl)
+
+                self._dict_box.append(row)
+
+            self._dict_box.set_visible(True)
+            has_content = True
+
     def show_loading(self) -> None:
         """Tampilkan spinner dan bersihkan label pesan galat (R5.5)."""
         self._spinner.set_visible(True)
@@ -579,6 +642,7 @@ class PopupWindow(Gtk.Window):
         self._error_label.set_visible(False)
         self._error_label.set_text("")
         self._clear_alternatives()
+        self._clear_dictionary()
 
     def show_result(self, result: "TranslationResult") -> None:
         """Tampilkan hasil terjemahan dan hentikan indikator kemajuan (Properti 4)."""
@@ -590,6 +654,11 @@ class PopupWindow(Gtk.Window):
         self._detected_lang = getattr(result, "detected_source_lang", None)
         self._result_label.set_text(result.text)
         self._result_label.set_visible(True)
+
+        # Tampilkan fonetik & kamus bila tersedia (kata tunggal ala Bob)
+        phonetic = getattr(result, "phonetic", "")
+        dict_entries = getattr(result, "dictionary_entries", ())
+        self._render_dictionary(phonetic, dict_entries)
 
         # Tampilkan kartu alternatif bila mode bandingkan aktif
         alternatives = getattr(result, "alternatives", ())
@@ -603,6 +672,8 @@ class PopupWindow(Gtk.Window):
         self._spinner.set_spinning(False)
         self._spinner.set_visible(False)
         self._clear_alternatives()
+        self._clear_dictionary()
+
 
         self._error_label.set_text(message)
         self._error_label.set_visible(True)

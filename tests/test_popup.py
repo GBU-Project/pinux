@@ -303,3 +303,46 @@ def test_popup_continuous_ocr_and_append() -> None:
     assert full == "Baris tunggal"
     assert popup.source_text == "Baris tunggal"
 
+
+def test_popup_renders_dictionary_and_phonetics() -> None:
+    """Verifikasi rendering label fonetik dan kontainer kamus pada hasil kata tunggal."""
+    from pinux.translate.base import DictionaryEntry
+
+    popup = PopupWindow()
+    popup.show_result(
+        TranslationResult(
+            text="apel",
+            detected_source_lang="en",
+            provider_id="google-free",
+            phonetic="ˈap(ə)l",
+            dictionary_entries=(
+                DictionaryEntry(part_of_speech="noun", terms=("apel", "buah apel")),
+            ),
+        )
+    )
+
+    assert popup._phonetic_label.get_visible()
+    assert popup._phonetic_label.get_text() == "[ˈap(ə)l]"
+    assert popup._dict_box.get_visible()
+
+    texts: list[str] = []
+
+    def walk(widget: Gtk.Widget) -> None:
+        if isinstance(widget, Gtk.Label):
+            texts.append(widget.get_text())
+        child = widget.get_first_child()
+        while child is not None:
+            walk(child)
+            child = child.get_next_sibling()
+
+    walk(popup._dict_box)
+    assert "noun" in texts
+    assert "apel, buah apel" in texts
+
+    # Saat loading atau error, fonetik dan kamus harus dibersihkan
+    popup.show_loading()
+    assert not popup._phonetic_label.get_visible()
+    assert not popup._dict_box.get_visible()
+    assert popup._dict_box.get_first_child() is None
+
+

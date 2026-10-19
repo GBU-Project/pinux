@@ -17,12 +17,14 @@ __all__ = [
     "ERROR_KINDS",
     "ErrorKind",
     "AlternativeResult",
+    "DictionaryEntry",
     "Language",
     "TranslationError",
     "TranslationProvider",
     "TranslationRequest",
     "TranslationResult",
 ]
+
 
 ErrorKind = Literal["network", "timeout", "auth", "rate_limit", "provider", "cancelled"]
 
@@ -67,6 +69,14 @@ class AlternativeResult:
 
 
 @dataclass(frozen=True)
+class DictionaryEntry:
+    """Entri kamus untuk satu kelas kata (noun, verb, dsb.) beserta definisi/sinonimnya."""
+
+    part_of_speech: str
+    terms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class TranslationResult:
     """Hasil penerjemahan beserta Source_Language yang terdeteksi."""
 
@@ -75,6 +85,11 @@ class TranslationResult:
     provider_id: str
     #: Hasil layanan tambahan (mode bandingkan); kosong pada penggunaan biasa.
     alternatives: tuple[AlternativeResult, ...] = ()
+    #: Simbol fonetik (IPA/pinyin/transliterasi bila tersedia untuk kata tunggal).
+    phonetic: str = ""
+    #: Entri kamus (kata tunggal): part of speech dan sinonim/artinya.
+    dictionary_entries: tuple[DictionaryEntry, ...] = ()
+
 
 
 class TranslationError(Exception):

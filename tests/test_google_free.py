@@ -62,8 +62,9 @@ def test_build_request_url_query_parameters() -> None:
     assert params["client"] == ["gtx"]
     assert params["sl"] == ["auto"]
     assert params["tl"] == ["en"]
-    assert params["dt"] == ["t"]
+    assert params["dt"] == ["t", "bd", "rm"]
     assert params["q"] == ["Halo Dunia"]
+
 
 
 def test_build_request_url_with_explicit_source() -> None:
@@ -101,6 +102,28 @@ def test_parse_response_with_fallback_detected_lang() -> None:
     result = parse_response(sample_json, "google-free", fallback_source_lang="en")
     assert result.text == "Bonjour"
     assert result.detected_source_lang == "en"
+
+
+def test_parse_response_with_dictionary_and_phonetics() -> None:
+    sample_json = json.dumps([
+        [
+            ["apel", "apple", None, None],
+            [None, None, None, "ˈap(ə)l"],
+        ],
+        [
+            ["noun", ["apel", "buah apel"]],
+        ],
+        "en",
+    ])
+
+    result = parse_response(sample_json, "google-free")
+    assert result.text == "apel"
+    assert result.detected_source_lang == "en"
+    assert result.phonetic == "ˈap(ə)l"
+    assert len(result.dictionary_entries) == 1
+    assert result.dictionary_entries[0].part_of_speech == "noun"
+    assert result.dictionary_entries[0].terms == ("apel", "buah apel")
+
 
 
 def test_parse_response_invalid_json_raises_translation_error() -> None:
