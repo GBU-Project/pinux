@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from typing import Any
@@ -12,7 +14,37 @@ from typing import Any
 from pinux.scheduler import CancelToken
 from pinux.translate.base import TranslationError
 
-__all__ = ["http_status_to_kind", "post_json"]
+__all__ = ["http_status_to_kind", "is_local_url", "post_json", "validate_endpoint"]
+
+
+def is_local_url(url: str) -> bool:
+    """True bila host URL adalah localhost atau alamat loopback sungguhan.
+
+    Pencocokan awalan seperti ``startswith("127.")`` salah menerima nama host
+    ``127.0.0.1.contoh.com``; alamat IP harus lolos ``ipaddress`` sebagai loopback.
+    """
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_endpoint(url: str, *, provider_id: str, secret_present: bool) -> None:
+    """Tolak skema tak sah, dan pengiriman kunci rahasia lewat HTTP ke host non-lokal."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise TranslationError(
+            "network", provider_id, f"Alamat endpoint '{url}' tidak valid; gunakan http:// atau https://"
+        )
+    if secret_present and parsed.scheme == "http" and not is_local_url(url):
+        raise TranslationError(
+            "auth",
+            provider_id,
+            "Pengiriman API key melalui koneksi HTTP tidak aman ditolak. Gunakan HTTPS.",
+        )
 
 
 def http_status_to_kind(code: int) -> str:

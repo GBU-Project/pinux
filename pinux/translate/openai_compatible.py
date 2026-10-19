@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from pinux.scheduler import CancelToken
+from pinux.translate._http import is_local_url
 from pinux.translate.base import (
     Language,
     TranslationError,
@@ -66,8 +67,7 @@ class OpenAICompatibleProvider:
 
     def _is_local_endpoint(self) -> bool:
         """True bila endpoint lokal (Ollama/LM Studio), yang tidak memerlukan API key."""
-        host = (urllib.parse.urlparse(self.endpoint_url).hostname or "").lower()
-        return host in ("localhost", "::1") or host.startswith("127.")
+        return is_local_url(self.endpoint_url)
 
     def requires_credential(self) -> bool:
         """API key wajib, kecuali endpoint lokal (Ollama/LM Studio)."""

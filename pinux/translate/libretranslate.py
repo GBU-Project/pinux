@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from pinux.scheduler import CancelToken
-from pinux.translate._http import post_json
+from pinux.translate._http import post_json, validate_endpoint
 from pinux.translate.base import Language, TranslationError, TranslationRequest, TranslationResult
 from pinux.translate.openai_compatible import SUPPORTED_LANGUAGES
 
@@ -43,8 +43,10 @@ class LibreTranslateProvider:
             "target": request.target_lang,
             "format": "text",
         }
-        if credential and credential.strip():
-            payload["api_key"] = credential.strip()
+        key = (credential or "").strip()
+        validate_endpoint(self.endpoint_url, provider_id=self.id, secret_present=bool(key))
+        if key:
+            payload["api_key"] = key
 
         data = post_json(
             self.endpoint_url.rstrip("/") + "/translate",

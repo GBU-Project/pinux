@@ -274,3 +274,53 @@ def test_config_roundtrip_compare_providers(tmp_path):
     s.compare_providers = ["deepl", "openai"]
     store.save(s)
     assert store.load().compare_providers == ["deepl", "openai"]
+
+
+# --- Keamanan endpoint ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url,local",
+    [
+        ("http://localhost:11434/v1", True),
+        ("http://127.0.0.1:5000", True),
+        ("http://127.5.6.7/x", True),
+        ("http://[::1]:8080/x", True),
+        ("http://127.0.0.1.evil.com/x", False),  # nama host, bukan IP loopback
+        ("http://localhost.evil.com/x", False),
+        ("https://api.openai.com/v1", False),
+        ("http://192.168.1.10:5000", False),
+        ("tidak-valid", False),
+    ],
+)
+def test_is_local_url_uses_real_loopback_check(url, local):
+    from pinux.translate._http import is_local_url
+
+    assert is_local_url(url) is local
+
+
+def test_libretranslate_refuses_key_over_plain_http_to_remote_host():
+    p = LibreTranslateProvider(endpoint_url="http://libre.example.com")
+    with pytest.raises(TranslationError) as e:
+        p.translate(_req(), "rahasia")
+    assert e.value.kind == "auth" and "HTTPS" in e.value.message
+
+
+def test_libretranslate_rejects_bad_scheme_and_allows_key_on_loopback(server):
+    with pytest.raises(TranslationError) as e:
+        LibreTranslateProvider(endpoint_url="ftp://x").translate(_req())
+    assert e.value.kind == "network"
+
+    _H.reply = {"translatedText": "halo"}
+    res = LibreTranslateProvider(endpoint_url=server).translate(_req(), "k")  # loopback: boleh
+    assert res.text == "halo" and _H.seen["body"]["api_key"] == "k"
+
+
+def test_openai_lookalike_loopback_host_does_not_bypass_https_guard():
+    from pinux.translate.openai_compatible import OpenAICompatibleProvider
+
+    p = OpenAICompatibleProvider(endpoint_url="http://127.0.0.1.evil.com/v1/chat/completions")
+    assert p.requires_credential() is True
+    with pytest.raises(TranslationError) as e:
+        p.translate(_req(), "sk-rahasia")
+    assert e.value.kind == "auth"
