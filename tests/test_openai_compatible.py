@@ -80,3 +80,14 @@ def test_openai_provider_handles_http_errors() -> None:
         with pytest.raises(TranslationError) as exc_info:
             provider.translate(req, credential="sk-bad")
         assert exc_info.value.kind == "rate_limit"
+
+
+def test_openai_rejects_insecure_http_api_key() -> None:
+    """Tolak pengiriman API key melalui koneksi plain HTTP non-local."""
+    provider = OpenAICompatibleProvider(endpoint_url="http://api.external.com/v1/chat/completions")
+    req = TranslationRequest("Testing", None, "en")
+    with pytest.raises(TranslationError) as exc_info:
+        provider.translate(req, credential="sk-secret-key")
+    assert exc_info.value.kind == "auth"
+    assert "HTTPS" in exc_info.value.message
+

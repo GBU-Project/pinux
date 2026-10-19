@@ -35,3 +35,10 @@ def test_pip_installs_are_offline() -> None:
     for line in text.splitlines():
         if "pip3 install" in line:
             assert "--no-index" in line, line
+
+
+def test_no_legacy_desktop_files() -> None:
+    """Hanya io.github.gbu_project.Pinux.desktop yang boleh ada di data/ (tidak ada org.pinux.Pinux)."""
+    assert not (ROOT / "data" / "org.pinux.Pinux.desktop").exists()
+    assert (ROOT / "data" / f"{APP_ID}.desktop").is_file()
+

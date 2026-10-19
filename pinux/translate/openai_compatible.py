@@ -89,6 +89,14 @@ class OpenAICompatibleProvider:
                 message="Permintaan terjemahan dibatalkan",
             )
 
+        parsed = urllib.parse.urlparse(self.endpoint_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise TranslationError(
+                kind="network",
+                provider_id=self.id,
+                message=f"Skema URL endpoint '{self.endpoint_url}' tidak valid; harus diawali http:// atau https://",
+            )
+
         api_key = credential.strip() if credential else ""
         if not api_key and not self._is_local_endpoint():
             raise TranslationError(
@@ -96,6 +104,15 @@ class OpenAICompatibleProvider:
                 provider_id=self.id,
                 message="API key belum diisi. Masukkan API key pada Pengaturan.",
             )
+
+        # Cegah kebocoran token API key melalui HTTP biasa ke jaringan luar/internet
+        if api_key and parsed.scheme == "http" and not self._is_local_endpoint():
+            raise TranslationError(
+                kind="auth",
+                provider_id=self.id,
+                message="Pengiriman API key melalui koneksi HTTP tidak aman ditolak. Gunakan HTTPS.",
+            )
+
 
         src_desc = f"from language '{request.source_lang}' " if request.source_lang else ""
         system_prompt = (

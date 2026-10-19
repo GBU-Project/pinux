@@ -8,13 +8,17 @@ global, lalu menampilkan hasil terjemahan pada jendela popup ringan. Pinux juga
 menyediakan OCR terjemahan dari tangkapan layar untuk teks yang tidak dapat
 disorot.
 
-> Status: tahap awal pengembangan. Lihat `tasklist.md` untuk kemajuan terkini.
+> Versi: `0.1.0` (stabil). Mendukung terjemahan seleksi/clipboard, kamus kata tunggal & fonetik, perbandingan multi-provider, TTS, dan OCR layar/berkas.
 
 ## Instalasi via Flatpak (Universal & Direkomendasikan)
 
 Flatpak adalah cara instalasi termudah dan universal untuk semua distribusi Linux (Ubuntu, Fedora, Arch, Debian, openSUSE, dll.), baik di lingkungan sesi **Wayland** maupun **X11**.
 
+> [!NOTE]
+> Paket bundle Flatpak standar berfokus pada fitur inti terjemahan teks ringan. Untuk pemrosesan OCR luring berbasis model neural (`rapidocr-onnxruntime`), disarankan menjalankan versi native dengan memasang ekstra `pinux[ocr]`.
+
 ### 1. Pasang dari Berkas Rilis (`Pinux.flatpak`)
+
 
 Unduh berkas `Pinux.flatpak` dari [Halaman Rilis GitHub](https://github.com/GBU-Project/pinux/releases), lalu pasang:
 
