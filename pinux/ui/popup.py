@@ -79,6 +79,8 @@ class PopupWindow(Gtk.Window):
         on_trigger_ocr: Callable[[], None] | None = None,
         on_ocr_file: Callable[[], None] | None = None,
         on_speak: Callable[[str, str | None], None] | None = None,
+        on_toggle_favorite: Callable[[int], bool | None] | None = None,
+        on_show_history: Callable[[], None] | None = None,
         tts_available: bool = False,
         pin_default: bool = False,
         continuous_ocr_default: bool = False,
@@ -96,6 +98,9 @@ class PopupWindow(Gtk.Window):
         self._on_ocr_file = on_ocr_file
         self._on_continuous_ocr_toggled = on_continuous_ocr_toggled
         self._on_speak = on_speak
+        self._on_toggle_favorite = on_toggle_favorite
+        self._on_show_history = on_show_history
+        self._current_entry_id: int | None = None
         self._tts_available = tts_available
         self._detected_lang: str | None = None
 
@@ -213,6 +218,19 @@ class PopupWindow(Gtk.Window):
         self._speak_result_button.connect("clicked", self._on_speak_result_clicked)
         self._speak_result_button.set_visible(self._tts_available)
         header_box.append(self._speak_result_button)
+
+        # Tombol Favorit & Riwayat
+        self._fav_button = Gtk.ToggleButton(icon_name="starred-symbolic")
+        self._fav_button.set_tooltip_text("Tandai terjemahan ini sebagai favorit")
+        self._fav_button.set_sensitive(False)
+        self._fav_button.connect("toggled", self._on_fav_toggled)
+        header_box.append(self._fav_button)
+
+        self._history_button = Gtk.Button(icon_name="document-open-recent-symbolic")
+        self._history_button.set_tooltip_text("Riwayat terjemahan")
+        self._history_button.connect("clicked", self._on_history_clicked)
+        self._history_button.set_visible(self._on_show_history is not None)
+        header_box.append(self._history_button)
 
         # Tombol Salin
         self._copy_button = Gtk.Button(icon_name="edit-copy-symbolic")
@@ -419,6 +437,27 @@ class PopupWindow(Gtk.Window):
     def _on_speak_result_clicked(self, btn: Gtk.Button) -> None:
         if self._current_result_text and self._on_speak is not None:
             self._on_speak(self._current_result_text, self._current_target_lang)
+
+    def set_current_entry(self, entry_id: int | None, favorite: bool = False) -> None:
+        """Kaitkan hasil yang tampil dengan entri riwayat (untuk tombol favorit)."""
+        self._current_entry_id = entry_id
+        self._fav_button.handler_block_by_func(self._on_fav_toggled)
+        try:
+            self._fav_button.set_active(favorite)
+        finally:
+            self._fav_button.handler_unblock_by_func(self._on_fav_toggled)
+        self._fav_button.set_sensitive(entry_id is not None)
+
+    def _on_fav_toggled(self, btn: Gtk.ToggleButton) -> None:
+        if self._current_entry_id is None or self._on_toggle_favorite is None:
+            return
+        new_state = self._on_toggle_favorite(self._current_entry_id)
+        if new_state is not None and new_state != btn.get_active():
+            self.set_current_entry(self._current_entry_id, new_state)
+
+    def _on_history_clicked(self, btn: Gtk.Button) -> None:
+        if self._on_show_history is not None:
+            self._on_show_history()
 
     def _on_copy_clicked(self, btn: Gtk.Button) -> None:
         if self._current_result_text and self._on_copy_result is not None:
@@ -643,6 +682,7 @@ class PopupWindow(Gtk.Window):
         self._error_label.set_text("")
         self._clear_alternatives()
         self._clear_dictionary()
+        self.set_current_entry(None)
 
     def show_result(self, result: "TranslationResult") -> None:
         """Tampilkan hasil terjemahan dan hentikan indikator kemajuan (Properti 4)."""

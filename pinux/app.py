@@ -18,6 +18,7 @@ Perujuk: R1.1, R1.3, R1.6, R6.3, R8.1, R8.3, R8.4, R10.1 pada requirements.md, s
 from __future__ import annotations
 
 import logging
+import sqlite3
 import sys
 from collections.abc import Sequence
 from typing import Any, Callable
@@ -39,11 +40,13 @@ from pinux.portal.screenshot import ScreenshotPortal
 from pinux.portal.shortcuts import ShortcutManager, ShortcutSpec, specs_from_settings
 from pinux.scheduler import RequestScheduler
 from pinux.translate.base import TranslationRequest
+from pinux.history import HistoryStore
 from pinux.tts import TtsEngine
 from pinux.translate.registry import ProviderRegistry
 from pinux.tray import TrayItem
 from pinux.ui.popup import PopupWindow
 from pinux.ui.region import RegionOverlay
+from pinux.ui.history import HistoryWindow
 from pinux.ui.settings import SettingsWindow
 
 __all__ = ["PinuxApp", "TriggerRouter"]
@@ -370,6 +373,7 @@ class TriggerRouter:
             )
             popup.show_detected_language(res.detected_source_lang)
             popup.show_result(res)
+            self.app.record_history(text, res, final_target_lang)
             # Auto-copy hasil terjemahan jika diaktifkan di pengaturan ala Bob
             if settings.text_processing.auto_copy_result and res.text:
                 self.app.text_capturer.send_to_clipboard(res.text)
@@ -420,6 +424,7 @@ class PinuxApp(Adw.Application):
         self.tts = TtsEngine()
 
         self.settings: Settings = self.config_store.load()
+        self.history: HistoryStore | None = self._open_history()
         # Muat provider pihak ketiga dari berkas pengaturan
         self.provider_registry.load_from_entries(self.settings.providers)
         self.provider_registry.apply_llm_settings(
@@ -505,6 +510,14 @@ class PinuxApp(Adw.Application):
             None,
         )
         self.add_main_option(
+            "history",
+            ord("h"),
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            "Membuka riwayat dan favorit terjemahan",
+            None,
+        )
+        self.add_main_option(
             "settings",
             ord("s"),
             GLib.OptionFlags.NONE,
@@ -533,6 +546,7 @@ class PinuxApp(Adw.Application):
         self._add_action("trigger-input", lambda *_: self.trigger_router.request_input_translate())
         self._add_action("trigger-ocr-copy", lambda *_: self.trigger_router.request_ocr_pure())
         self._add_action("settings", lambda *_: self.show_settings_window())
+        self._add_action("history", lambda *_: self.show_history_window())
         self._add_action("quit", lambda *_: self.quit_app())
 
 
@@ -613,6 +627,8 @@ class PinuxApp(Adw.Application):
             self.activate_action("trigger-ocr-copy", None)
         elif options.contains("settings"):
             self.activate_action("settings", None)
+        elif options.contains("history"):
+            self.activate_action("history", None)
         else:
             self.activate()
 
@@ -652,6 +668,8 @@ class PinuxApp(Adw.Application):
                 on_trigger_ocr=lambda: self.trigger_router.request_ocr(),
                 on_ocr_file=lambda: self.trigger_router.request_ocr_file(),
                 on_speak=lambda text, lang: self.tts.speak(text, lang),
+                on_toggle_favorite=self._toggle_favorite,
+                on_show_history=(self.show_history_window if self.history is not None else None),
                 tts_available=self.tts.available,
                 pin_default=self.settings.popup.pin_default,
                 continuous_ocr_default=self.settings.ocr.continuous_ocr,
@@ -736,6 +754,62 @@ class PinuxApp(Adw.Application):
             self._region_overlay = RegionOverlay()
         return self._region_overlay
 
+    def _open_history(self) -> HistoryStore | None:
+        """Buka basis data riwayat; None bila dimatikan atau gagal dibuka."""
+        if not self.settings.history.enabled:
+            return None
+        try:
+            return HistoryStore(max_entries=self.settings.history.max_entries)
+        except (OSError, sqlite3.Error) as exc:
+            logger.warning(f"Riwayat dinonaktifkan, basis data gagal dibuka: {exc}")
+            return None
+
+    def record_history(self, source_text: str, result: Any, target_lang: str) -> None:
+        """Simpan terjemahan ke riwayat dan kaitkan dengan tombol favorit popup."""
+        popup = self._popup_window
+        if self.history is None:
+            return
+        try:
+            entry_id = self.history.add(
+                source_text,
+                result.text,
+                result.detected_source_lang or "auto",
+                target_lang,
+                result.provider_id,
+            )
+        except sqlite3.Error as exc:
+            logger.warning(f"Gagal menyimpan riwayat: {exc}")
+            return
+        if popup is not None:
+            entry = self.history.get(entry_id) if entry_id is not None else None
+            popup.set_current_entry(entry_id, entry.favorite if entry else False)
+
+    def _toggle_favorite(self, entry_id: int) -> bool | None:
+        if self.history is None:
+            return None
+        return self.history.toggle_favorite(entry_id)
+
+    def show_history_window(self) -> None:
+        """Tampilkan HistoryWindow (bila riwayat aktif)."""
+        if self.history is None:
+            return
+
+        def _reuse(entry: Any) -> None:
+            popup = self.get_popup_window()
+            popup.set_source_text(entry.source_text)
+            popup.set_languages_display(entry.source_lang, entry.target_lang)
+            self.trigger_router._execute_translation(
+                entry.source_text,
+                source_lang=None if entry.source_lang == "auto" else entry.source_lang,
+                target_lang=entry.target_lang,
+            )
+            popup.present()
+
+        win = HistoryWindow(store=self.history, on_select=_reuse)
+        if self._popup_window is not None:
+            win.set_transient_for(self._popup_window)
+        win.present()
+
     def show_settings_window(self) -> None:
         """Tampilkan SettingsWindow."""
         if self._settings_window is None:
@@ -753,5 +827,7 @@ class PinuxApp(Adw.Application):
     def quit_app(self) -> None:
         """Hentikan aplikasi."""
         self.tts.stop()
+        if self.history is not None:
+            self.history.close()
         self.release()
         self.quit()

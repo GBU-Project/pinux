@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 __all__ = [
+    "HistorySettings",
     "LibreTranslateSettings",
     "LlmSettings",
     "OcrSettings",
@@ -68,6 +69,14 @@ class LlmSettings:
 
 
 @dataclass
+class HistorySettings:
+    """Riwayat terjemahan lokal; matikan ``enabled`` bila tidak ingin teks disimpan."""
+
+    enabled: bool = True
+    max_entries: int = 500
+
+
+@dataclass
 class LibreTranslateSettings:
     """Alamat instance LibreTranslate (self-hosted atau publik)."""
 
@@ -99,6 +108,7 @@ class Settings:
     text_processing: TextProcessingSettings = field(default_factory=TextProcessingSettings)
     llm: LlmSettings = field(default_factory=LlmSettings)
     libretranslate: LibreTranslateSettings = field(default_factory=LibreTranslateSettings)
+    history: HistorySettings = field(default_factory=HistorySettings)
     #: Provider cadangan berurutan bila provider utama gagal (jaringan/kuota/kunci).
     fallback_providers: list[str] = field(default_factory=list)
     #: Layanan tambahan yang hasilnya ditampilkan berdampingan dengan provider utama.

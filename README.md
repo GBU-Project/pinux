@@ -42,6 +42,7 @@ Jika portal pintasan global belum aktif otomatis di desktop Anda, Anda dapat men
 - **Terjemah Input Manual:** `flatpak run io.github.gbu_project.Pinux --input` (rekomendasi: `Ctrl+Alt+A`)
 - **OCR Senyap (Salin Teks Saja):** `flatpak run io.github.gbu_project.Pinux --ocr-copy` (rekomendasi: `Ctrl+Alt+C`)
 - **Jendela Pengaturan:** `flatpak run io.github.gbu_project.Pinux --settings`
+- **Riwayat & Favorit:** `flatpak run io.github.gbu_project.Pinux --history` (atau tombol jam di popup; matikan lewat `[history] enabled = false` di `pinux.toml`)
 
 ---
 
@@ -86,6 +87,7 @@ Bila portal GlobalShortcuts tidak tersedia pada lingkungan desktop Anda, Anda da
 - **OCR Kontinu:** `pinux --ocr-append` (atau aktifkan tombol ikon tambah di popup). Menambahkan hasil OCR baru ke teks sumber di popup alih-alih menimpa teks sebelumnya.
 - **OCR dari berkas gambar:** `pinux --ocr-file foto.png` (tambahkan `--ocr-copy` untuk hanya menyalin teks; juga tersedia lewat tombol gambar di popup). Bila gambar berisi kode QR dan tidak ada teks, isi QR yang dibaca (butuh OpenCV, ikut terpasang bersama paket OCR).
 - **Buka Jendela Pengaturan:** `pinux --settings`
+- **Buka Riwayat & Favorit:** `pinux --history`
 
 
 ## Terjemah seleksi (ala Bob)

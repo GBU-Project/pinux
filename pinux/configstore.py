@@ -71,6 +71,7 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
         "text_processing",
         "llm",
         "libretranslate",
+        "history",
         "fallback_providers",
         "compare_providers",
         "providers",
@@ -204,6 +205,10 @@ def render_settings(settings: Settings) -> str:
         f"endpoint_url = {_toml_value(settings.llm.endpoint_url)}",
         f"model = {_toml_value(settings.llm.model)}",
         "",
+        "[history]",
+        f"enabled = {_toml_value(settings.history.enabled)}",
+        f"max_entries = {_toml_value(settings.history.max_entries)}",
+        "",
         "[libretranslate]",
         f"endpoint_url = {_toml_value(settings.libretranslate.endpoint_url)}",
     ]
@@ -321,6 +326,18 @@ class ConfigStore:
         text_processing = document.get("text_processing")
         if text_processing is not None:
             self._read_text_processing(text_processing, settings.text_processing)
+
+        history = document.get("history")
+        if history is not None:
+            if isinstance(history, Mapping):
+                settings.history.enabled = self._read_bool(
+                    history, "enabled", settings.history.enabled, "history."
+                )
+                settings.history.max_entries = self._read_positive_int(
+                    history, "max_entries", settings.history.max_entries
+                )
+            else:
+                self._warn("Bagian [history] harus berupa tabel; nilai bawaan dipakai")
 
         for key in ("fallback_providers", "compare_providers"):
             values = document.get(key)
