@@ -77,6 +77,7 @@ class PopupWindow(Gtk.Window):
         on_retry: Callable[[], None] | None = None,
         on_copy_result: Callable[[str], None] | None = None,
         on_trigger_ocr: Callable[[], None] | None = None,
+        on_ocr_file: Callable[[], None] | None = None,
         on_speak: Callable[[str, str | None], None] | None = None,
         tts_available: bool = False,
         pin_default: bool = False,
@@ -90,6 +91,7 @@ class PopupWindow(Gtk.Window):
         self._on_retry = on_retry
         self._on_copy_result = on_copy_result
         self._on_trigger_ocr = on_trigger_ocr
+        self._on_ocr_file = on_ocr_file
         self._on_speak = on_speak
         self._tts_available = tts_available
         self._detected_lang: str | None = None
@@ -178,6 +180,13 @@ class PopupWindow(Gtk.Window):
         self._ocr_button.set_tooltip_text("Pilih area layar untuk OCR")
         self._ocr_button.connect("clicked", self._on_ocr_clicked)
         header_box.append(self._ocr_button)
+
+        # Tombol OCR dari berkas gambar
+        self._ocr_file_button = Gtk.Button(icon_name="insert-image-symbolic")
+        self._ocr_file_button.set_tooltip_text("OCR dari berkas gambar")
+        self._ocr_file_button.connect("clicked", self._on_ocr_file_clicked)
+        self._ocr_file_button.set_visible(self._on_ocr_file is not None)
+        header_box.append(self._ocr_file_button)
 
         # Tombol suara (TTS): ucapkan teks sumber / hasil terjemahan
         self._speak_source_button = Gtk.Button(icon_name="audio-speakers-symbolic")
@@ -367,6 +376,10 @@ class PopupWindow(Gtk.Window):
         if self._on_swap_languages is not None:
             self._on_swap_languages()
 
+    def _on_ocr_file_clicked(self, btn: Gtk.Button) -> None:
+        if self._on_ocr_file is not None:
+            self._on_ocr_file()
+
     def _on_ocr_clicked(self, btn: Gtk.Button) -> None:
         if self._on_trigger_ocr is not None:
             self._on_trigger_ocr()
@@ -494,7 +507,7 @@ class PopupWindow(Gtk.Window):
 
             # Header kartu: nama provider
             header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            prov_name = alt.provider_display_name or alt.provider_id
+            prov_name = alt.display_name or alt.provider_id
             title_lbl = Gtk.Label(label=prov_name)
             title_lbl.add_css_class("caption")
             title_lbl.add_css_class("dim-label")

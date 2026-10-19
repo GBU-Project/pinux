@@ -236,3 +236,39 @@ def test_popup_window_internal_keyboard_shortcuts() -> None:
         Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK,
     )
     assert copied_text == "Teks hasil"
+
+
+def test_popup_renders_compare_alternative_cards() -> None:
+    """Regresi: kartu mode bandingkan memakai AlternativeResult.display_name."""
+    from pinux.translate.base import AlternativeResult
+
+    popup = PopupWindow()
+    popup.show_result(
+        TranslationResult(
+            "halo",
+            "en",
+            "google-free",
+            alternatives=(
+                AlternativeResult("deepl", "DeepL", text="hai"),
+                AlternativeResult("openai", "OpenAI", error="HTTP 429"),
+            ),
+        )
+    )
+    assert popup._alternatives_box.get_visible()
+
+    texts: list[str] = []
+
+    def walk(widget: Gtk.Widget) -> None:
+        if isinstance(widget, Gtk.Label):
+            texts.append(widget.get_text())
+        child = widget.get_first_child()
+        while child is not None:
+            walk(child)
+            child = child.get_next_sibling()
+
+    walk(popup._alternatives_box)
+    assert "DeepL" in texts and "hai" in texts
+    assert "OpenAI" in texts and "Gagal: HTTP 429" in texts
+
+    popup.show_loading()
+    assert popup._alternatives_box.get_first_child() is None
