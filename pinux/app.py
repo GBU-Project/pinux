@@ -27,7 +27,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from pinux import APP_ID
+from pinux import APP_ID, __version__
 from pinux.capture.capturer import TextCapturer, clean_text
 from pinux.config import Settings
 from pinux.configstore import ConfigStore
