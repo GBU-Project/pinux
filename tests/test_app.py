@@ -190,9 +190,10 @@ def test_trigger_router_request_ocr_file(tmp_path: Path) -> None:
 
     with pytest.MonkeyPatch.context() as mp:
         choose_called = False
-        mp.setattr(router, "_choose_image_file", lambda copy_only: setattr(router, "_ch", copy_only))
+        mp.setattr(router, "_choose_image_file", lambda copy_only, **kw: setattr(router, "_ch", copy_only))
         router.request_ocr_file(None, copy_only=True)
         assert getattr(router, "_ch", None) is True
+
 
     test_img = tmp_path / "test.png"
     from PIL import Image
@@ -213,8 +214,9 @@ def test_trigger_router_request_ocr_file(tmp_path: Path) -> None:
 
     with pytest.MonkeyPatch.context() as mp:
         ocr_calls = []
-        mp.setattr(router, "_on_ocr_image", lambda data: ocr_calls.append(("translate", data)))
-        mp.setattr(router, "_on_ocr_pure_image", lambda data: ocr_calls.append(("copy", data)))
+        mp.setattr(router, "_on_ocr_image", lambda data, **kw: ocr_calls.append(("translate", data)))
+        mp.setattr(router, "_on_ocr_pure_image", lambda data, **kw: ocr_calls.append(("copy", data)))
+
 
         router.request_ocr_file(str(test_img), copy_only=False)
         flush_glib()
@@ -235,5 +237,34 @@ def test_trigger_router_request_ocr_file(tmp_path: Path) -> None:
                 break
         assert len(ocr_calls) == 2
         assert ocr_calls[1][0] == "copy"
+
+
+def test_trigger_router_continuous_ocr_append() -> None:
+    """Verifikasi bahwa dalam mode kontinu atau append, teks lama di popup diakumulasikan."""
+    mock_app = MagicMock()
+    mock_app.settings = Settings()
+    mock_app.settings.ocr.continuous_ocr = True
+
+    mock_popup = MagicMock()
+    mock_popup.continuous_ocr = True
+    mock_popup.source_text = "Kalimat awal"
+    mock_popup.append_source_text.side_effect = lambda t: f"Kalimat awal\n\n{t}"
+    mock_app.get_popup_window.return_value = mock_popup
+
+    router = TriggerRouter(mock_app)
+
+    with pytest.MonkeyPatch.context() as mp:
+        executed_translations: list[str] = []
+        mp.setattr(router, "_execute_translation", lambda t: executed_translations.append(t))
+
+        # Panggil _on_ocr_image langsung dengan mode append aktif
+        with pytest.MonkeyPatch.context() as mp2:
+            mp2.setattr(router, "_run_ocr_in_background", lambda png, cb, **kw: cb("Kalimat kedua"))
+            router._on_ocr_image(b"fake_png", append=True)
+
+        assert mock_popup.append_source_text.called
+        assert len(executed_translations) == 1
+        assert executed_translations[0] == "Kalimat awal\n\nKalimat kedua"
+
 
 

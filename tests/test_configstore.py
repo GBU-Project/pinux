@@ -267,13 +267,14 @@ def test_popup_invalid_fields_fall_back(config_store: ConfigStore) -> None:
 def test_ocr_table_is_parsed(config_store: ConfigStore) -> None:
     config_store.path.parent.mkdir(parents=True, exist_ok=True)
     config_store.path.write_text(
-        '[ocr]\nengine = "tesseract"\nenabled = false\n', encoding="utf-8"
+        '[ocr]\nengine = "tesseract"\nenabled = false\ncontinuous_ocr = true\n', encoding="utf-8"
     )
 
     settings = config_store.load()
 
-    assert settings.ocr == OcrSettings(engine="tesseract", enabled=False)
+    assert settings.ocr == OcrSettings(engine="tesseract", enabled=False, continuous_ocr=True)
     assert config_store.warnings == ()
+
 
 
 def test_ocr_section_wrong_type_warns(config_store: ConfigStore) -> None:
@@ -605,7 +606,9 @@ ocr_settings_st = st.builds(
     OcrSettings,
     engine=identifier_st,
     enabled=st.booleans(),
+    continuous_ocr=st.booleans(),
 )
+
 
 text_processing_settings_st = st.builds(
     TextProcessingSettings,

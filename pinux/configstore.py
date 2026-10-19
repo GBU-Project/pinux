@@ -191,7 +191,9 @@ def render_settings(settings: Settings) -> str:
         "[ocr]",
         f"engine = {_toml_value(settings.ocr.engine)}",
         f"enabled = {_toml_value(settings.ocr.enabled)}",
+        f"continuous_ocr = {_toml_value(settings.ocr.continuous_ocr)}",
         "",
+
         "[text_processing]",
         f"unwrap_lines = {_toml_value(settings.text_processing.unwrap_lines)}",
         f"remove_hyphens = {_toml_value(settings.text_processing.remove_hyphens)}",
@@ -448,6 +450,8 @@ class ConfigStore:
             return
         ocr.engine = self._read_str(table, "engine", ocr.engine)
         ocr.enabled = self._read_bool(table, "enabled", ocr.enabled, "ocr.")
+        ocr.continuous_ocr = self._read_bool(table, "continuous_ocr", ocr.continuous_ocr, "ocr.")
+
 
     def _read_text_processing(self, table: Any, tp: TextProcessingSettings) -> None:
         if not isinstance(table, Mapping):

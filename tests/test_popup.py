@@ -272,3 +272,34 @@ def test_popup_renders_compare_alternative_cards() -> None:
 
     popup.show_loading()
     assert popup._alternatives_box.get_first_child() is None
+
+
+def test_popup_continuous_ocr_and_append() -> None:
+    """Verifikasi toggle continuous_ocr dan method append_source_text."""
+    toggled_states: list[bool] = []
+    popup = PopupWindow(
+        continuous_ocr_default=False,
+        on_continuous_ocr_toggled=lambda state: toggled_states.append(state),
+    )
+
+    assert popup.continuous_ocr is False
+    popup.continuous_ocr = True
+    assert popup.continuous_ocr is True
+
+    # Toggle via button click
+    popup._continuous_ocr_button.set_active(False)
+    assert popup.continuous_ocr is False
+    assert False in toggled_states
+
+    # Append source text
+    popup.set_source_text("Baris pertama")
+    full = popup.append_source_text("Baris kedua")
+    assert full == "Baris pertama\n\nBaris kedua"
+    assert popup.source_text == "Baris pertama\n\nBaris kedua"
+
+    # Append saat kosong langsung mengisi tanpa extra newline
+    popup.set_source_text("")
+    full = popup.append_source_text("Baris tunggal")
+    assert full == "Baris tunggal"
+    assert popup.source_text == "Baris tunggal"
+

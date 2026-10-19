@@ -81,6 +81,8 @@ class PopupWindow(Gtk.Window):
         on_speak: Callable[[str, str | None], None] | None = None,
         tts_available: bool = False,
         pin_default: bool = False,
+        continuous_ocr_default: bool = False,
+        on_continuous_ocr_toggled: Callable[[bool], None] | None = None,
         width: int = 420,
     ) -> None:
         super().__init__()
@@ -92,11 +94,14 @@ class PopupWindow(Gtk.Window):
         self._on_copy_result = on_copy_result
         self._on_trigger_ocr = on_trigger_ocr
         self._on_ocr_file = on_ocr_file
+        self._on_continuous_ocr_toggled = on_continuous_ocr_toggled
         self._on_speak = on_speak
         self._tts_available = tts_available
         self._detected_lang: str | None = None
 
         self._pinned: bool = pin_default
+        self._continuous_ocr: bool = continuous_ocr_default
+
         self._ignore_text_changes: bool = False
         self._ignore_lang_changes: bool = False
         self._debounce_id: int | None = None
@@ -187,6 +192,14 @@ class PopupWindow(Gtk.Window):
         self._ocr_file_button.connect("clicked", self._on_ocr_file_clicked)
         self._ocr_file_button.set_visible(self._on_ocr_file is not None)
         header_box.append(self._ocr_file_button)
+
+        # Tombol OCR kontinu (append teks baru ke kotak teks)
+        self._continuous_ocr_button = Gtk.ToggleButton(icon_name="list-add-symbolic")
+        self._continuous_ocr_button.set_tooltip_text("Mode OCR kontinu: tambahkan hasil baru ke teks sumber")
+        self._continuous_ocr_button.set_active(self._continuous_ocr)
+        self._continuous_ocr_button.connect("toggled", self._on_continuous_ocr_toggled_internal)
+        header_box.append(self._continuous_ocr_button)
+
 
         # Tombol suara (TTS): ucapkan teks sumber / hasil terjemahan
         self._speak_source_button = Gtk.Button(icon_name="audio-speakers-symbolic")
@@ -397,8 +410,25 @@ class PopupWindow(Gtk.Window):
         if self._current_result_text and self._on_copy_result is not None:
             self._on_copy_result(self._current_result_text)
 
+    def _on_continuous_ocr_toggled_internal(self, btn: Gtk.ToggleButton) -> None:
+        self._continuous_ocr = btn.get_active()
+        if self._on_continuous_ocr_toggled is not None:
+            self._on_continuous_ocr_toggled(self._continuous_ocr)
+
+    @property
+    def continuous_ocr(self) -> bool:
+        """Apakah mode OCR kontinu (append) sedang aktif."""
+        return self._continuous_ocr
+
+    @continuous_ocr.setter
+    def continuous_ocr(self, value: bool) -> None:
+        self._continuous_ocr = bool(value)
+        if hasattr(self, "_continuous_ocr_button"):
+            self._continuous_ocr_button.set_active(self._continuous_ocr)
+
     def _on_pin_toggled(self, btn: Gtk.ToggleButton) -> None:
         self._pinned = btn.get_active()
+
 
     def present_at_cursor(self, x: int, y: int) -> None:
         """Tampilkan jendela popup pada posisi kursor dengan offset 16 piksel (R1.4)."""
@@ -420,6 +450,14 @@ class PopupWindow(Gtk.Window):
             self._entry.set_text(text)
         finally:
             self._ignore_text_changes = False
+
+    def append_source_text(self, text: str, sep: str = "\n\n") -> str:
+        """Tambahkan teks ke akhir entry (mode kontinu/append) dan kembalikan teks lengkapnya."""
+        current = self.source_text.strip()
+        new_text = f"{current}{sep}{text.strip()}" if current else text.strip()
+        self.set_source_text(new_text)
+        return new_text
+
 
     def _on_src_lang_changed(self, dropdown: Gtk.DropDown, pspec: Any) -> None:
         if self._ignore_lang_changes:

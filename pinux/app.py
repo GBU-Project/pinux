@@ -124,10 +124,19 @@ class TriggerRouter:
         self,
         cropped_png: bytes,
         on_text: Callable[[str], None],
+        *,
+        append_mode: bool | None = None,
     ) -> None:
         """Jalankan OCR pada thread latar; ``on_text`` dipanggil di thread utama."""
         popup = self.app.get_popup_window()
-        popup.set_source_text("Membaca teks dari gambar...")
+        # Jika mode kontinu aktif (atau dipaksa via append_mode), pertahankan teks yang ada
+        is_continuous = (
+            append_mode
+            if append_mode is not None
+            else (popup.continuous_ocr or self.app.settings.ocr.continuous_ocr)
+        )
+        if not is_continuous or not popup.source_text.strip():
+            popup.set_source_text("Membaca teks dari gambar...")
         popup.show_loading()
         popup.present_at_cursor(0, 0)
 
@@ -151,14 +160,20 @@ class TriggerRouter:
         import threading
         threading.Thread(target=_bg, daemon=True).start()
 
-    def request_ocr_file(self, path: str | None = None, *, copy_only: bool = False) -> None:
+    def request_ocr_file(
+        self,
+        path: str | None = None,
+        *,
+        copy_only: bool = False,
+        append: bool | None = None,
+    ) -> None:
         """OCR dari berkas gambar; tanpa ``path`` tampilkan dialog pemilih berkas."""
         if path is None:
-            self._choose_image_file(copy_only)
+            self._choose_image_file(copy_only, append=append)
         else:
-            self._ocr_from_file(path, copy_only)
+            self._ocr_from_file(path, copy_only, append=append)
 
-    def _choose_image_file(self, copy_only: bool) -> None:
+    def _choose_image_file(self, copy_only: bool, *, append: bool | None = None) -> None:
         if not hasattr(Gtk, "FileDialog"):  # GTK < 4.10
             self.app.get_popup_window().show_error(
                 "Dialog berkas memerlukan GTK 4.10+. Gunakan: pinux --ocr-file BERKAS"
@@ -179,16 +194,32 @@ class TriggerRouter:
             except GLib.Error:
                 return  # dibatalkan pengguna
             if picked is not None and picked.get_path():
-                self._ocr_from_file(picked.get_path(), copy_only)
+                self._ocr_from_file(picked.get_path(), copy_only, append=append)
 
         dialog.open(self.app._popup_window, None, _done)
 
-    def _ocr_from_file(self, path: str, copy_only: bool) -> None:
+    def _ocr_from_file(
+        self,
+        path: str,
+        copy_only: bool,
+        *,
+        append: bool | None = None,
+    ) -> None:
         popup = self.app.get_popup_window()
-        popup.set_source_text("Memuat gambar...")
+        is_continuous = (
+            append
+            if append is not None
+            else (popup.continuous_ocr or self.app.settings.ocr.continuous_ocr)
+        )
+        if not is_continuous or not popup.source_text.strip():
+            popup.set_source_text("Memuat gambar...")
         popup.show_loading()
         popup.present_at_cursor(0, 0)
-        handler = self._on_ocr_pure_image if copy_only else self._on_ocr_image
+        handler = (
+            (lambda png: self._on_ocr_pure_image(png, append=append))
+            if copy_only
+            else (lambda png: self._on_ocr_image(png, append=append))
+        )
 
         def _load() -> None:
             try:
@@ -202,32 +233,57 @@ class TriggerRouter:
         import threading
         threading.Thread(target=_load, daemon=True).start()
 
-    def request_ocr_pure(self) -> None:
+    def request_ocr_pure(self, *, append: bool | None = None) -> None:
         """Pilih area layar lalu salin teks OCR ke clipboard tanpa menerjemahkan."""
-        self._open_region_picker(self._on_ocr_pure_image, "OCR murni")
+        self._open_region_picker(
+            lambda cropped: self._on_ocr_pure_image(cropped, append=append),
+            "OCR murni",
+        )
 
-    def _on_ocr_pure_image(self, cropped_png: bytes) -> None:
+    def _on_ocr_pure_image(self, cropped_png: bytes, *, append: bool | None = None) -> None:
         popup = self.app.get_popup_window()
+        is_continuous = (
+            append
+            if append is not None
+            else (popup.continuous_ocr or self.app.settings.ocr.continuous_ocr)
+        )
 
         def _copied(text: str) -> None:
-            self.app.text_capturer.send_to_clipboard(text)
-            popup.set_source_text(text)
+            if is_continuous and popup.source_text.strip() and popup.source_text != "Membaca teks dari gambar...":
+                full_text = popup.append_source_text(text)
+            else:
+                full_text = text
+                popup.set_source_text(text)
+            self.app.text_capturer.send_to_clipboard(full_text)
             popup.show_error("✓ Teks OCR berhasil disalin ke clipboard.")
 
-        self._run_ocr_in_background(cropped_png, _copied)
+        self._run_ocr_in_background(cropped_png, _copied, append_mode=append)
 
-    def request_ocr(self) -> None:
+    def request_ocr(self, *, append: bool | None = None) -> None:
         """Pilih area layar, OCR, lalu terjemahkan (R6.1, R6.2, R6.3)."""
-        self._open_region_picker(self._on_ocr_image, "OCR")
+        self._open_region_picker(
+            lambda cropped: self._on_ocr_image(cropped, append=append),
+            "OCR",
+        )
 
-    def _on_ocr_image(self, cropped_png: bytes) -> None:
+    def _on_ocr_image(self, cropped_png: bytes, *, append: bool | None = None) -> None:
         popup = self.app.get_popup_window()
+        is_continuous = (
+            append
+            if append is not None
+            else (popup.continuous_ocr or self.app.settings.ocr.continuous_ocr)
+        )
 
         def _translate(text: str) -> None:
-            popup.set_source_text(text)
-            self._execute_translation(text)
+            if is_continuous and popup.source_text.strip() and popup.source_text != "Membaca teks dari gambar...":
+                full_text = popup.append_source_text(text)
+            else:
+                full_text = text
+                popup.set_source_text(text)
+            self._execute_translation(full_text)
 
-        self._run_ocr_in_background(cropped_png, _translate)
+        self._run_ocr_in_background(cropped_png, _translate, append_mode=append)
+
 
     def _execute_translation(
         self,
@@ -440,6 +496,14 @@ class PinuxApp(Adw.Application):
             "BERKAS",
         )
         self.add_main_option(
+            "ocr-append",
+            0,
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            "Picu OCR dan tambahkan hasilnya ke teks yang ada di popup (mode kontinu)",
+            None,
+        )
+        self.add_main_option(
             "settings",
             ord("s"),
             GLib.OptionFlags.NONE,
@@ -447,6 +511,7 @@ class PinuxApp(Adw.Application):
             "Membuka jendela pengaturan",
             None,
         )
+
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -463,10 +528,12 @@ class PinuxApp(Adw.Application):
         # Daftarkan aksi aplikasi Gio
         self._add_action("trigger-translate", lambda *_: self.trigger_router.request_translate())
         self._add_action("trigger-ocr", lambda *_: self.trigger_router.request_ocr())
+        self._add_action("trigger-ocr-append", lambda *_: self.trigger_router.request_ocr(append=True))
         self._add_action("trigger-input", lambda *_: self.trigger_router.request_input_translate())
         self._add_action("trigger-ocr-copy", lambda *_: self.trigger_router.request_ocr_pure())
         self._add_action("settings", lambda *_: self.show_settings_window())
         self._add_action("quit", lambda *_: self.quit_app())
+
 
         # Mulai ShortcutManager setelah startup selesai: pengikatan portal dapat
         # menampilkan dialog persetujuan dan menunggu hingga puluhan detik.
@@ -527,13 +594,17 @@ class PinuxApp(Adw.Application):
             self.trigger_router.request_ocr_file(
                 os.path.join(cwd, os.path.expanduser(raw)),
                 copy_only=options.contains("ocr-copy"),
+                append=options.contains("ocr-append") or None,
             )
         elif options.contains("trigger"):
             self.activate_action("trigger-translate", None)
+        elif options.contains("ocr-append"):
+            self.activate_action("trigger-ocr-append", None)
         elif options.contains("pick-region"):
             self.activate_action("trigger-ocr", None)
         elif options.contains("input"):
             self.activate_action("trigger-input", None)
+
         elif options.contains("ocr-copy"):
             self.activate_action("trigger-ocr-copy", None)
         elif options.contains("settings"):
@@ -579,11 +650,17 @@ class PinuxApp(Adw.Application):
                 on_speak=lambda text, lang: self.tts.speak(text, lang),
                 tts_available=self.tts.available,
                 pin_default=self.settings.popup.pin_default,
+                continuous_ocr_default=self.settings.ocr.continuous_ocr,
+                on_continuous_ocr_toggled=lambda val: self._on_continuous_ocr_toggled(val),
                 width=self.settings.popup.width,
             )
             # Setel bahasa awal sesuai pengaturan
             self._popup_window.set_languages_display("auto", self.settings.target_language)
         return self._popup_window
+
+    def _on_continuous_ocr_toggled(self, active: bool) -> None:
+        self.settings.ocr.continuous_ocr = active
+
 
     def _on_retry_translation(self) -> None:
         """Picu penerjemahan ulang (Ctrl+R) menggunakan teks yang ada di popup."""

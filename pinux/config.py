@@ -43,6 +43,8 @@ class OcrSettings:
 
     engine: str = "rapidocr"
     enabled: bool = True
+    continuous_ocr: bool = False
+
 
 
 @dataclass(frozen=True)
