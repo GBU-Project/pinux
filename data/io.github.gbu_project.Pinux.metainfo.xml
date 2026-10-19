@@ -29,10 +29,16 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-10-19">
+      <description>
+        <p>Fitur baru: OCR dari berkas gambar &amp; kode QR, mode OCR kontinu, kamus kata tunggal &amp; simbol fonetik, akselerasi perangkat keras DRI, dan perbaikan keamanan.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-17">
       <description>
         <p>Rilis perdana Pinux dengan dukungan terjemahan popup, OCR RapidOCR, integrasi LLM lokal, dan pemrosesan teks.</p>
       </description>
     </release>
   </releases>
+
 </component>

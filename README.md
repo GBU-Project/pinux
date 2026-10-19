@@ -8,7 +8,8 @@ global, lalu menampilkan hasil terjemahan pada jendela popup ringan. Pinux juga
 menyediakan OCR terjemahan dari tangkapan layar untuk teks yang tidak dapat
 disorot.
 
-> Versi: `0.1.0` (stabil). Mendukung terjemahan seleksi/clipboard, kamus kata tunggal & fonetik, perbandingan multi-provider, TTS, dan OCR layar/berkas.
+> Versi: `0.2.0` (stabil). Mendukung terjemahan seleksi/clipboard, kamus kata tunggal & fonetik, perbandingan multi-provider, TTS, OCR layar/berkas, dan kode QR.
+
 
 ## Instalasi via Flatpak (Universal & Direkomendasikan)
 
