@@ -78,6 +78,7 @@ Bila portal GlobalShortcuts tidak tersedia pada lingkungan desktop Anda, Anda da
 - **Tangkapan Layar & OCR:** `pinux --pick-region` (rekomendasi pintasan: `Ctrl+Alt+O`)
 - **Terjemah Input:** `pinux --input` (rekomendasi pintasan: `Ctrl+Alt+A`). Ketik teks, tekan Enter untuk menerjemahkan, Shift+Enter untuk baris baru.
 - **OCR Senyap:** `pinux --ocr-copy` (rekomendasi pintasan: `Ctrl+Alt+C`). Pilih area layar, teks hasil OCR disalin ke clipboard tanpa terjemahan.
+- **OCR dari berkas gambar:** `pinux --ocr-file foto.png` (tambahkan `--ocr-copy` untuk hanya menyalin teks; juga tersedia lewat tombol gambar di popup). Bila gambar berisi kode QR dan tidak ada teks, isi QR yang dibaca (butuh OpenCV, ikut terpasang bersama paket OCR).
 - **Buka Jendela Pengaturan:** `pinux --settings`
 
 ## Terjemah seleksi (ala Bob)

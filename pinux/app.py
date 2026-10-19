@@ -32,6 +32,8 @@ from pinux.capture.capturer import TextCapturer, clean_text
 from pinux.config import Settings
 from pinux.configstore import ConfigStore
 from pinux.credentials import CredentialStore
+from pinux.ocr.imagefile import ImageFileError, load_image_as_png
+from pinux.ocr.pipeline import recognize_text_or_qr
 from pinux.ocr.client import OcrWorkerClient
 from pinux.portal.screenshot import ScreenshotPortal
 from pinux.portal.shortcuts import ShortcutManager, ShortcutSpec, specs_from_settings
@@ -131,13 +133,15 @@ class TriggerRouter:
 
         def _bg() -> None:
             try:
-                ocr_text = self.app.ocr_client.recognize(cropped_png).text.strip()
-                if not ocr_text:
+                recognized = recognize_text_or_qr(self.app.ocr_client, cropped_png)
+                if recognized is None:
                     GLib.idle_add(
-                        lambda: popup.show_error("Tidak ada teks yang terdeteksi pada area gambar.")
+                        lambda: popup.show_error(
+                            "Tidak ada teks atau kode QR yang terdeteksi pada gambar."
+                        )
                     )
                     return
-                ocr_text = ocr_text[: self.app.settings.max_chars]
+                ocr_text = recognized.text[: self.app.settings.max_chars]
                 GLib.idle_add(lambda: on_text(ocr_text))
             except Exception as exc:
                 logger.error(f"Kegagalan alur OCR: {exc}")
@@ -146,6 +150,57 @@ class TriggerRouter:
 
         import threading
         threading.Thread(target=_bg, daemon=True).start()
+
+    def request_ocr_file(self, path: str | None = None, *, copy_only: bool = False) -> None:
+        """OCR dari berkas gambar; tanpa ``path`` tampilkan dialog pemilih berkas."""
+        if path is None:
+            self._choose_image_file(copy_only)
+        else:
+            self._ocr_from_file(path, copy_only)
+
+    def _choose_image_file(self, copy_only: bool) -> None:
+        if not hasattr(Gtk, "FileDialog"):  # GTK < 4.10
+            self.app.get_popup_window().show_error(
+                "Dialog berkas memerlukan GTK 4.10+. Gunakan: pinux --ocr-file BERKAS"
+            )
+            return
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Pilih gambar untuk OCR")
+        image_filter = Gtk.FileFilter()
+        image_filter.set_name("Gambar")
+        image_filter.add_mime_type("image/*")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(image_filter)
+        dialog.set_filters(filters)
+
+        def _done(dlg: Any, result: Any) -> None:
+            try:
+                picked = dlg.open_finish(result)
+            except GLib.Error:
+                return  # dibatalkan pengguna
+            if picked is not None and picked.get_path():
+                self._ocr_from_file(picked.get_path(), copy_only)
+
+        dialog.open(self.app._popup_window, None, _done)
+
+    def _ocr_from_file(self, path: str, copy_only: bool) -> None:
+        popup = self.app.get_popup_window()
+        popup.set_source_text("Memuat gambar...")
+        popup.show_loading()
+        popup.present_at_cursor(0, 0)
+        handler = self._on_ocr_pure_image if copy_only else self._on_ocr_image
+
+        def _load() -> None:
+            try:
+                png = load_image_as_png(path)
+            except ImageFileError as exc:
+                message = str(exc)
+                GLib.idle_add(lambda: popup.show_error(message))
+                return
+            GLib.idle_add(lambda: handler(png))
+
+        import threading
+        threading.Thread(target=_load, daemon=True).start()
 
     def request_ocr_pure(self) -> None:
         """Pilih area layar lalu salin teks OCR ke clipboard tanpa menerjemahkan."""
@@ -377,6 +432,14 @@ class PinuxApp(Adw.Application):
             None,
         )
         self.add_main_option(
+            "ocr-file",
+            0,
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.FILENAME,
+            "OCR dari berkas gambar (gabungkan dengan --ocr-copy untuk hanya menyalin)",
+            "BERKAS",
+        )
+        self.add_main_option(
             "settings",
             ord("s"),
             GLib.OptionFlags.NONE,
@@ -455,7 +518,17 @@ class PinuxApp(Adw.Application):
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
         options = command_line.get_options_dict()
 
-        if options.contains("trigger"):
+        ocr_file = options.lookup_value("ocr-file", None)
+        if ocr_file is not None:
+            import os
+
+            raw = ocr_file.get_bytestring().decode(errors="replace")
+            cwd = command_line.get_cwd() or os.getcwd()
+            self.trigger_router.request_ocr_file(
+                os.path.join(cwd, os.path.expanduser(raw)),
+                copy_only=options.contains("ocr-copy"),
+            )
+        elif options.contains("trigger"):
             self.activate_action("trigger-translate", None)
         elif options.contains("pick-region"):
             self.activate_action("trigger-ocr", None)
@@ -502,6 +575,7 @@ class PinuxApp(Adw.Application):
                 on_retry=lambda: self._on_retry_translation(),
                 on_copy_result=lambda res: self.text_capturer.send_to_clipboard(res),
                 on_trigger_ocr=lambda: self.trigger_router.request_ocr(),
+                on_ocr_file=lambda: self.trigger_router.request_ocr_file(),
                 on_speak=lambda text, lang: self.tts.speak(text, lang),
                 tts_available=self.tts.available,
                 pin_default=self.settings.popup.pin_default,

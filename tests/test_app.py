@@ -179,3 +179,61 @@ def test_request_ocr_uses_frozen_frame_picker() -> None:
     kwargs = mock_overlay.open.call_args.kwargs
     assert kwargs["screenshot_provider"] is mock_app.screenshot_portal.capture_fullscreen
     assert callable(kwargs["on_image"]) and callable(kwargs["on_error"])
+
+
+def test_trigger_router_request_ocr_file(tmp_path: Path) -> None:
+    """request_ocr_file dengan path memuat berkas dan memanggil handler yang tepat."""
+    mock_app = MagicMock()
+    mock_popup = MagicMock()
+    mock_app.get_popup_window.return_value = mock_popup
+    router = TriggerRouter(mock_app)
+
+    with pytest.MonkeyPatch.context() as mp:
+        choose_called = False
+        mp.setattr(router, "_choose_image_file", lambda copy_only: setattr(router, "_ch", copy_only))
+        router.request_ocr_file(None, copy_only=True)
+        assert getattr(router, "_ch", None) is True
+
+    test_img = tmp_path / "test.png"
+    from PIL import Image
+    Image.new("RGB", (10, 10), (255, 0, 0)).save(test_img, format="PNG")
+
+    from gi.repository import GLib
+
+    def flush_glib(timeout: float = 0.5) -> None:
+        import time
+        start = time.time()
+        ctx = GLib.MainContext.default()
+        while time.time() - start < timeout:
+            while ctx.iteration(False):
+                pass
+            time.sleep(0.02)
+            if len(ocr_calls) > 0:
+                break
+
+    with pytest.MonkeyPatch.context() as mp:
+        ocr_calls = []
+        mp.setattr(router, "_on_ocr_image", lambda data: ocr_calls.append(("translate", data)))
+        mp.setattr(router, "_on_ocr_pure_image", lambda data: ocr_calls.append(("copy", data)))
+
+        router.request_ocr_file(str(test_img), copy_only=False)
+        flush_glib()
+        assert len(ocr_calls) == 1
+        assert ocr_calls[0][0] == "translate"
+        assert len(ocr_calls[0][1]) > 0
+
+        router.request_ocr_file(str(test_img), copy_only=True)
+        # Tunggu call kedua
+        import time
+        start = time.time()
+        ctx = GLib.MainContext.default()
+        while time.time() - start < 0.5:
+            while ctx.iteration(False):
+                pass
+            time.sleep(0.02)
+            if len(ocr_calls) == 2:
+                break
+        assert len(ocr_calls) == 2
+        assert ocr_calls[1][0] == "copy"
+
+
