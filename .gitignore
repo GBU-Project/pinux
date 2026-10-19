@@ -16,3 +16,7 @@ __pycache__/
 
 # Patch temporer
 *.patch
+
+# Artefak Flatpak lokal
+Pinux.flatpak
+.flatpak-builder/
