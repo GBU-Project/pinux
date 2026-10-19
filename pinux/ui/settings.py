@@ -174,8 +174,9 @@ class SettingsWindow(Adw.PreferencesWindow):
 
         # Kelompok Pemrosesan Teks & Otomatisasi (ala Bob)
         text_group = Adw.PreferencesGroup()
-        text_group.set_title("Pemrosesan Teks & Otomatisasi")
+        text_group.set_title("Pemrosesan Teks dan Otomatisasi")
         text_group.set_description(
+
             "Optimasi teks sebelum diterjemahkan (berguna untuk PDF, kode sumber, atau OCR)."
         )
 

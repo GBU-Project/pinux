@@ -9,6 +9,8 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
+  - --device=dri
+
 
   # Akses Jaringan (Untuk Google Translate & OpenAI API)
   - --share=network
