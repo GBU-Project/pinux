@@ -268,3 +268,33 @@ def test_trigger_router_continuous_ocr_append() -> None:
 
 
 
+
+
+def _command_line(*flags: str, cwd: str = "/tmp") -> MagicMock:
+    from gi.repository import GLib
+
+    options = GLib.VariantDict.new(None)
+    for flag in flags:
+        options.insert_value(flag, GLib.Variant.new_boolean(True))
+    cmd = MagicMock()
+    cmd.get_options_dict.return_value = options
+    cmd.get_cwd.return_value = cwd
+    return cmd
+
+
+def test_command_line_ocr_copy_with_append_copies_without_translating(tmp_path: Path) -> None:
+    app = PinuxApp(
+        config_store=ConfigStore(tmp_path / "pinux.toml"),
+        credential_store=CredentialStore(tmp_path / "creds.toml", force_fallback=True),
+        shortcut_manager=MagicMock(),
+        tray_item=MagicMock(),
+    )
+    app.trigger_router = MagicMock()
+    app.activate_action = MagicMock()  # type: ignore[method-assign]
+
+    assert app.do_command_line(_command_line("ocr-copy", "ocr-append")) == 0
+    app.trigger_router.request_ocr_pure.assert_called_once_with(append=True)
+    app.activate_action.assert_not_called()
+
+    app.do_command_line(_command_line("ocr-append"))
+    app.activate_action.assert_called_once_with("trigger-ocr-append", None)

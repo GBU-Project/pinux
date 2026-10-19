@@ -599,6 +599,9 @@ class PinuxApp(Adw.Application):
             )
         elif options.contains("trigger"):
             self.activate_action("trigger-translate", None)
+        elif options.contains("ocr-append") and options.contains("ocr-copy"):
+            # --ocr-copy --ocr-append: tambahkan ke teks popup dan salin, tanpa terjemahan
+            self.trigger_router.request_ocr_pure(append=True)
         elif options.contains("ocr-append"):
             self.activate_action("trigger-ocr-append", None)
         elif options.contains("pick-region"):
