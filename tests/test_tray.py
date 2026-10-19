@@ -118,7 +118,8 @@ def test_tray_item_sni_properties_and_version() -> None:
     props = sni.GetAll("org.kde.StatusNotifierItem")
 
     assert str(props["Id"]) == APP_ID
-    assert str(props["IconName"]) == APP_ID
+    assert str(props["IconName"]) in (APP_ID, "pinux")
+    assert "IconPixmap" in props
     assert "ToolTip" in props
 
     # Test DbusMenu default version

@@ -165,6 +165,50 @@ class DbusMenuService(dbus.service.Object):
 
 
 
+def _load_icon_pixmap() -> dbus.Array:
+    """Muat data piksel ARGB byte-order network dari ikon Pinux untuk IconPixmap.
+
+    Menjamin host tray (AppIndicator / KDE / Waybar) selalu menampilkan ikon
+    meskipun tema ikon belum di-cache atau nama ikon tidak ditemukan di sistem host.
+    """
+    empty_pixmap = dbus.Array([], signature="(iiay)")
+    try:
+        from pathlib import Path
+        from PIL import Image
+        import struct
+
+        # Prioritas: cari ikon resolusi 24x24 / 32x32 dari paket Pinux
+        candidates = [
+            Path("/app/share/icons/hicolor/24x24/apps/pinux.png"),
+            Path(__file__).resolve().parent.parent / "data" / "icons" / "hicolor" / "24x24" / "apps" / "pinux.png",
+            Path.home() / ".local" / "share" / "icons" / "hicolor" / "24x24" / "apps" / "pinux.png",
+        ]
+        icon_file: Path | None = None
+        for cand in candidates:
+            if cand.is_file():
+                icon_file = cand
+                break
+
+        if icon_file is None:
+            return empty_pixmap
+
+        im = Image.open(icon_file).convert("RGBA")
+        w, h = im.size
+        pixels = bytearray()
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = im.getpixel((x, y))
+                pixels.extend(struct.pack(">I", (a << 24) | (r << 16) | (g << 8) | b))
+
+        return dbus.Array(
+            [dbus.Struct((dbus.Int32(w), dbus.Int32(h), dbus.ByteArray(pixels)), signature=None)],
+            signature="(iiay)",
+        )
+    except Exception as exc:
+        logger.debug("Gagal membuat IconPixmap dari ikon Pinux: %s", exc)
+        return empty_pixmap
+
+
 class StatusNotifierItemService(dbus.service.Object):
     """Layanan D-Bus untuk StatusNotifierItem."""
 
@@ -180,6 +224,7 @@ class StatusNotifierItemService(dbus.service.Object):
         self._menu_path = menu_path
         self._on_activate = on_activate
         self._on_context_menu = on_context_menu
+        self._pixmap = _load_icon_pixmap()
 
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
     def Get(self, interface_name: str, property_name: str) -> Any:
@@ -194,21 +239,26 @@ class StatusNotifierItemService(dbus.service.Object):
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
     def GetAll(self, interface_name: str) -> dict[str, Any]:
         if interface_name == SNI_INTERFACE:
-            theme_path = "/app/share/icons/hicolor" if os.environ.get("FLATPAK_ID") else ""
+            if os.environ.get("FLATPAK_ID"):
+                theme_path = "/app/share/icons/hicolor"
+            else:
+                user_icons = os.path.expanduser("~/.local/share/icons")
+                theme_path = user_icons if os.path.isdir(user_icons) else ""
             return {
                 "Category": dbus.String("ApplicationStatus"),
                 "Id": dbus.String(APP_ID),
                 "Title": dbus.String("Pinux"),
                 "Status": dbus.String("Active"),
-                "IconName": dbus.String(APP_ID),
+                "IconName": dbus.String("pinux"),
+                "IconPixmap": self._pixmap,
                 "IconThemePath": dbus.String(theme_path),
                 "ItemIsMenu": dbus.Boolean(False),
                 "Menu": dbus.ObjectPath(self._menu_path),
                 "WindowId": dbus.Int32(0),
                 "ToolTip": dbus.Struct(
                     (
-                        dbus.String(APP_ID),
-                        dbus.Array([], signature="(iiay)"),
+                        dbus.String("pinux"),
+                        self._pixmap,
                         dbus.String("Pinux Translator"),
                         dbus.String("Klik kanan untuk menu pengaturan / OCR"),
                     ),
