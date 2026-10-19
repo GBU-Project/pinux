@@ -445,6 +445,7 @@ class PinuxApp(Adw.Application):
             on_ocr_pure=self.trigger_router.request_ocr_pure,
             on_settings=self.show_settings_window,
             on_quit=self.quit_app,
+            version_string=f"Pinux v{__version__}",
         )
 
         self._popup_window: PopupWindow | None = None

@@ -74,14 +74,23 @@ modules:
 
       # Pasang Ikon Hicolor (SVG scalable dan ukuran PNG)
       - install -Dm644 data/icons/pinux.svg /app/share/icons/hicolor/scalable/apps/io.github.gbu_project.Pinux.svg
+      - install -Dm644 data/icons/pinux.svg /app/share/icons/hicolor/scalable/apps/pinux.svg
       - install -Dm644 data/icons/hicolor/16x16/apps/pinux.png /app/share/icons/hicolor/16x16/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/16x16/apps/pinux.png /app/share/icons/hicolor/16x16/apps/pinux.png
       - install -Dm644 data/icons/hicolor/24x24/apps/pinux.png /app/share/icons/hicolor/24x24/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/24x24/apps/pinux.png /app/share/icons/hicolor/24x24/apps/pinux.png
       - install -Dm644 data/icons/hicolor/32x32/apps/pinux.png /app/share/icons/hicolor/32x32/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/32x32/apps/pinux.png /app/share/icons/hicolor/32x32/apps/pinux.png
       - install -Dm644 data/icons/hicolor/48x48/apps/pinux.png /app/share/icons/hicolor/48x48/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/48x48/apps/pinux.png /app/share/icons/hicolor/48x48/apps/pinux.png
       - install -Dm644 data/icons/hicolor/64x64/apps/pinux.png /app/share/icons/hicolor/64x64/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/64x64/apps/pinux.png /app/share/icons/hicolor/64x64/apps/pinux.png
       - install -Dm644 data/icons/hicolor/128x128/apps/pinux.png /app/share/icons/hicolor/128x128/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/128x128/apps/pinux.png /app/share/icons/hicolor/128x128/apps/pinux.png
       - install -Dm644 data/icons/hicolor/256x256/apps/pinux.png /app/share/icons/hicolor/256x256/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/256x256/apps/pinux.png /app/share/icons/hicolor/256x256/apps/pinux.png
       - install -Dm644 data/icons/hicolor/512x512/apps/pinux.png /app/share/icons/hicolor/512x512/apps/io.github.gbu_project.Pinux.png
+      - install -Dm644 data/icons/hicolor/512x512/apps/pinux.png /app/share/icons/hicolor/512x512/apps/pinux.png
     sources:
       - type: dir
         path: ..

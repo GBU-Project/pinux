@@ -108,3 +108,23 @@ def test_tray_item_menu_events() -> None:
     run_idle()
     assert events_called["quit"] is True
 
+
+def test_tray_item_sni_properties_and_version() -> None:
+    from pinux import APP_ID, __version__
+    from pinux.tray import DbusMenuService, StatusNotifierItemService
+
+    mock_bus = MagicMock()
+    sni = StatusNotifierItemService(mock_bus, "/StatusNotifierItem", "/MenuBar")
+    props = sni.GetAll("org.kde.StatusNotifierItem")
+
+    assert str(props["Id"]) == APP_ID
+    assert str(props["IconName"]) == APP_ID
+    assert "ToolTip" in props
+
+    # Test DbusMenu default version
+    menu = DbusMenuService(bus=mock_bus, object_path="/MenuBar")
+    _, root = menu.GetLayout(0, 1)
+    # Item index 9 adalah label versi
+    version_item = root[2][9]
+    assert version_item[1]["label"] == f"Pinux v{__version__}"
+

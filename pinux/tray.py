@@ -22,6 +22,8 @@ from typing import Any, Final
 import dbus
 import dbus.service
 
+from pinux import APP_ID, __version__
+
 __all__ = ["TrayItem"]
 
 logger = logging.getLogger("pinux.tray")
@@ -62,7 +64,7 @@ class DbusMenuService(dbus.service.Object):
         on_ocr_pure: Callable[[], None] | None = None,
         on_settings: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
-        version_string: str = "Pinux v0.1.0",
+        version_string: str = f"Pinux v{__version__}",
     ) -> None:
         super().__init__(bus, object_path)
         self._on_translate_selection = on_translate_selection
@@ -192,19 +194,20 @@ class StatusNotifierItemService(dbus.service.Object):
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="s", out_signature="a{sv}")
     def GetAll(self, interface_name: str) -> dict[str, Any]:
         if interface_name == SNI_INTERFACE:
+            theme_path = "/app/share/icons/hicolor" if os.environ.get("FLATPAK_ID") else ""
             return {
                 "Category": dbus.String("ApplicationStatus"),
-                "Id": dbus.String("pinux"),
+                "Id": dbus.String(APP_ID),
                 "Title": dbus.String("Pinux"),
                 "Status": dbus.String("Active"),
-                "IconName": dbus.String("pinux"),
-                "IconThemePath": dbus.String(""),
+                "IconName": dbus.String(APP_ID),
+                "IconThemePath": dbus.String(theme_path),
                 "ItemIsMenu": dbus.Boolean(False),
                 "Menu": dbus.ObjectPath(self._menu_path),
                 "WindowId": dbus.Int32(0),
                 "ToolTip": dbus.Struct(
                     (
-                        dbus.String("pinux"),
+                        dbus.String(APP_ID),
                         dbus.Array([], signature="(iiay)"),
                         dbus.String("Pinux Translator"),
                         dbus.String("Klik kanan untuk menu pengaturan / OCR"),
@@ -269,7 +272,7 @@ class TrayItem:
         on_settings: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
         on_ocr: Callable[[], None] | None = None,  # Backward compatibility
-        version_string: str = "Pinux v0.1.0",
+        version_string: str = f"Pinux v{__version__}",
     ) -> None:
         self._bus = bus
         self._on_translate_selection = on_translate_selection
