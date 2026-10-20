@@ -62,8 +62,10 @@ class RapidOcrEngine:
         if self._engine is None:
             self.ensure_model()
 
+        import numpy as np
         from PIL import Image
-        img = Image.open(io.BytesIO(image_png)).convert("RGB")
+        pil_img = Image.open(io.BytesIO(image_png)).convert("RGB")
+        img = np.array(pil_img)
 
         if cancel is not None and cancel.cancelled:
             raise RuntimeError("Pengenalan OCR dibatalkan")
