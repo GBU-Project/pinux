@@ -16,6 +16,8 @@ Perujuk: R1.2, R1.3, R8.1, R8.3, R8.4 pada requirements.md, serta design.md.
 from __future__ import annotations
 
 import logging
+import os
+import shlex
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -322,6 +324,52 @@ def specs_from_settings(shortcuts: dict[str, str]) -> tuple[ShortcutSpec, ...]:
     )
 
 
+# Alasan pintasan portal tidak aktif (``ShortcutManager.last_reason``).
+REASON_PORTAL_UNAVAILABLE: Final[str] = "portal_unavailable"
+REASON_BIND_FAILED: Final[str] = "bind_failed"
+
+# Opsi CLI yang setara dengan tiap id pintasan (R1.3).
+CLI_FLAGS: Final[dict[str, str]] = {
+    "translate": "--trigger",
+    "ocr": "--pick-region",
+}
+
+_FALLBACK_INTRO: Final[str] = (
+    "Ikat perintah berikut secara manual pada Pengaturan Keyboard desktop Anda:"
+)
+_FALLBACK_DESCRIPTIONS: Final[dict[str, str]] = {
+    REASON_PORTAL_UNAVAILABLE: "Portal GlobalShortcuts tidak tersedia di desktop ini. " + _FALLBACK_INTRO,
+    REASON_BIND_FAILED: (
+        "Pintasan global tidak aktif: permintaan ke portal ditolak, dibatalkan, "
+        "atau tidak dijawab. " + _FALLBACK_INTRO
+    ),
+}
+
+
+def is_flatpak() -> bool:
+    """Apakah Pinux berjalan di dalam sandbox Flatpak."""
+    return bool(os.environ.get("FLATPAK_ID")) or os.path.exists("/.flatpak-info")
+
+
+def cli_command(flag: str, *, flatpak: bool | None = None) -> str:
+    """Perintah shell lengkap untuk ``flag`` (mis. ``--trigger``), siap diikat ke pintasan.
+
+    Di Flatpak perintahnya ``flatpak run <APP_ID> <flag>``, di luar itu ``pinux <flag>``.
+    ``flatpak=None`` berarti dideteksi otomatis.
+    """
+    if flatpak is None:
+        flatpak = is_flatpak()
+    argv = ["flatpak", "run", APP_ID, flag] if flatpak else ["pinux", flag]
+    return shlex.join(argv)
+
+
+def describe_fallback(reason: object) -> str:
+    """Teks penjelasan mode CLI sesuai alasan; nilai tak dikenal memakai teks umum."""
+    if isinstance(reason, str) and reason in _FALLBACK_DESCRIPTIONS:
+        return _FALLBACK_DESCRIPTIONS[reason]
+    return "Pintasan global belum aktif. " + _FALLBACK_INTRO
+
+
 class ShortcutManager:
     """Manajer pintasan: memilih portal bila tersedia, dan fallback CLI bila tidak (R1.3)."""
 
@@ -347,11 +395,23 @@ class ShortcutManager:
         self._on_activated = on_activated
         self._active_backend: ShortcutBackend = "cli"
         self._bound_shortcuts: list[BoundShortcut] = []
+        self._last_reason: str | None = None
 
     @property
     def active_backend(self) -> ShortcutBackend:
         """Backend aktif saat ini: 'portal' atau 'cli'."""
         return self._active_backend
+
+    @property
+    def last_reason(self) -> str | None:
+        """Alasan portal tidak aktif: ``REASON_*``, atau ``None`` bila aktif/belum dimulai."""
+        return self._last_reason
+
+    @property
+    def missing_shortcuts(self) -> tuple[str, ...]:
+        """Id pintasan yang belum terikat pada portal (ditolak sebagian atau portal mati)."""
+        bound_ids = {b.id for b in self._bound_shortcuts}
+        return tuple(s.id for s in self._specs if s.id not in bound_ids)
 
     @property
     def bound_shortcuts(self) -> Sequence[BoundShortcut]:
@@ -390,6 +450,7 @@ class ShortcutManager:
         if not self._portal.is_available():
             logger.info("Portal GlobalShortcuts tidak tersedia. Beralih ke mode CLI.")
             self._active_backend = "cli"
+            self._last_reason = REASON_PORTAL_UNAVAILABLE
             return "cli"
 
         if self._on_activated is not None:
@@ -400,6 +461,7 @@ class ShortcutManager:
             if bound:
                 self._bound_shortcuts = bound
                 self._active_backend = "portal"
+                self._last_reason = None
                 return "portal"
         except Exception as exc:
             logger.info(f"Pintasan portal tidak aktif ({exc}). Beralih ke mode CLI.")
@@ -411,6 +473,7 @@ class ShortcutManager:
             "'pinux --trigger' dan 'pinux --pick-region')."
         )
         self._active_backend = "cli"
+        self._last_reason = REASON_BIND_FAILED
         return "cli"
 
     def stop(self) -> None:
@@ -419,3 +482,4 @@ class ShortcutManager:
             self._portal.close()
         self._bound_shortcuts = []
         self._active_backend = "cli"
+        self._last_reason = None

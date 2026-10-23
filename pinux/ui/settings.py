@@ -25,6 +25,14 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk
 
+from pinux.portal.shortcuts import CLI_FLAGS, cli_command, describe_fallback
+
+# Judul baris pintasan pada halaman Pintasan (id sesuai ShortcutSpec).
+_SHORTCUT_TITLES = {
+    "translate": "Penerjemahan Clipboard",
+    "ocr": "Seleksi OCR Tangkapan Layar",
+}
+
 if TYPE_CHECKING:
     from pinux.config import Settings
     from pinux.configstore import ConfigStore
@@ -332,22 +340,27 @@ class SettingsWindow(Adw.PreferencesWindow):
             cfg_btn.connect("clicked", lambda _: self._shortcut_manager.configure_shortcuts())
             btn_row.add_suffix(cfg_btn)
             group.add(btn_row)
+
+            # Pintasan yang tidak disetujui portal tetap perlu jalur CLI (R1.3)
+            for sid in tuple(self._shortcut_manager.missing_shortcuts):
+                flag = CLI_FLAGS.get(sid)
+                if flag is None:
+                    continue
+                missing_row = Adw.ActionRow()
+                missing_row.set_title(f"{_SHORTCUT_TITLES.get(sid, sid.capitalize())} (tidak disetujui)")
+                missing_row.set_subtitle(GLib.markup_escape_text(cli_command(flag)))
+                missing_row.set_subtitle_selectable(True)
+                group.add(missing_row)
         else:
             group.set_title("Pintasan Keyboard Manual (CLI Mode)")
-            group.set_description(
-                "Portal GlobalShortcuts tidak tersedia. Ikat perintah berikut secara manual "
-                "pada Pengaturan Keyboard Desktop GNOME:"
-            )
+            group.set_description(describe_fallback(self._shortcut_manager.last_reason))
 
-            row_trig = Adw.ActionRow()
-            row_trig.set_title("Penerjemahan Clipboard")
-            row_trig.set_subtitle("pinux --trigger")
-            group.add(row_trig)
-
-            row_ocr = Adw.ActionRow()
-            row_ocr.set_title("Seleksi OCR Tangkapan Layar")
-            row_ocr.set_subtitle("pinux --pick-region")
-            group.add(row_ocr)
+            for sid in ("translate", "ocr"):
+                row = Adw.ActionRow()
+                row.set_title(_SHORTCUT_TITLES[sid])
+                row.set_subtitle(GLib.markup_escape_text(cli_command(CLI_FLAGS[sid])))
+                row.set_subtitle_selectable(True)
+                group.add(row)
 
         page.add(group)
         self.add(page)
