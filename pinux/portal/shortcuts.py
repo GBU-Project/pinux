@@ -94,7 +94,13 @@ class GlobalShortcutsPortal:
             return False
 
     def connect_activated(self, callback: Callable[[str], None]) -> None:
-        """Daftarkan callback saat shortcut ditekan (sinyal Activated diterima)."""
+        """Daftarkan callback saat shortcut ditekan (sinyal Activated diterima).
+
+        Idempoten: callback yang sama (termasuk bound method yang sama) tidak
+        didaftarkan dua kali, agar satu penekanan tombol tidak memicu router ganda.
+        """
+        if callback in self._activated_callbacks:
+            return
         self._activated_callbacks.append(callback)
 
     def _on_activated(self, session_handle: str, shortcut_id: str, timestamp: int, options: dict) -> None:
@@ -232,8 +238,50 @@ class GlobalShortcutsPortal:
             bound.append(BoundShortcut(id=sid, trigger=trigger, activation_token=sid))
         return bound
 
+    def _portal_version(self) -> int:
+        """Baca properti ``version`` portal GlobalShortcuts; 1 bila tidak terbaca."""
+        try:
+            bus = self._get_bus()
+            portal = bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
+            props = dbus.Interface(portal, "org.freedesktop.DBus.Properties")
+            return int(props.Get(GLOBAL_SHORTCUTS_INTERFACE, "version"))
+        except Exception as exc:
+            logger.debug(f"Versi portal GlobalShortcuts tidak terbaca: {exc}")
+            return 1
+
+    def configure_shortcuts(self, parent_window: str = "") -> bool:
+        """Buka dialog konfigurasi pintasan milik desktop (``ConfigureShortcuts``).
+
+        Hanya tersedia pada portal GlobalShortcuts versi 2 ke atas dan saat sesi
+        aktif. Mengembalikan ``True`` bila permintaan terkirim, ``False`` bila
+        tidak didukung atau gagal (tanpa melempar galat).
+        """
+        if not self._session_path:
+            logger.info("ConfigureShortcuts dilewati: belum ada sesi portal aktif")
+            return False
+        if self._portal_version() < 2:
+            logger.info("ConfigureShortcuts dilewati: portal GlobalShortcuts versi < 2")
+            return False
+        try:
+            bus = self._get_bus()
+            portal = bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
+            iface = dbus.Interface(portal, GLOBAL_SHORTCUTS_INTERFACE)
+            iface.ConfigureShortcuts(
+                dbus.ObjectPath(self._session_path),
+                dbus.String(parent_window),
+                dbus.Dictionary({}, signature="sv"),
+            )
+            return True
+        except Exception as exc:
+            logger.warning(f"ConfigureShortcuts gagal: {exc}")
+            return False
+
     def unbind(self, bindings: Sequence[BoundShortcut]) -> None:
-        """Lepaskan pintasan atau tutup sesi."""
+        """Tutup seluruh sesi portal; argumen ``bindings`` tidak dipakai.
+
+        Portal tidak menyediakan pelepasan per-pintasan, sehingga satu-satunya cara
+        melepas pengikatan adalah menutup sesi.
+        """
         self.close()
 
     def close(self) -> None:
@@ -315,11 +363,30 @@ class ShortcutManager:
         if self._active_backend == "portal" and self._portal is not None:
             self._portal.configure_shortcuts(parent_window)
 
+    def _release_portal(self) -> None:
+        """Tutup sesi portal setelah pengikatan gagal agar tidak bocor.
+
+        Sesi yang dibiarkan terbuka membuat dialog persetujuan bisa disetujui
+        belakangan sementara UI sudah menampilkan mode CLI. Keputusan desain:
+        pada jalur gagal sesi selalu ditutup.
+        """
+        try:
+            self._portal.close()
+        except Exception as exc:
+            logger.debug(f"Penutupan sesi portal setelah gagal bind bermasalah: {exc}")
+        self._bound_shortcuts = []
+
     def start(self) -> ShortcutBackend:
         """Mulai manajer pintasan.
 
         Mengembalikan 'portal' jika portal berhasil diikat, atau 'cli' jika gagal/tidak tersedia.
+        Idempoten saat backend portal sudah aktif: pemanggilan ulang tidak membuka
+        sesi baru maupun mendaftarkan callback ganda. Pada jalur gagal sesi portal
+        ditutup; memanggil ``start()`` lagi dari mode CLI akan mencoba ulang.
         """
+        if self._active_backend == "portal" and self._bound_shortcuts:
+            return "portal"
+
         if not self._portal.is_available():
             logger.info("Portal GlobalShortcuts tidak tersedia. Beralih ke mode CLI.")
             self._active_backend = "cli"
@@ -337,8 +404,12 @@ class ShortcutManager:
         except Exception as exc:
             logger.info(f"Pintasan portal tidak aktif ({exc}). Beralih ke mode CLI.")
 
-        # Fallback ke CLI mode jika ditolak pengguna atau error
-        logger.info("Menggunakan mode CLI (R1.3: pintasan desktop dapat dipanggil via 'pinux --trigger').")
+        # Fallback ke CLI mode jika ditolak pengguna atau error; sesi ditutup dahulu
+        self._release_portal()
+        logger.info(
+            "Menggunakan mode CLI (R1.3: pintasan desktop dapat dipanggil via "
+            "'pinux --trigger' dan 'pinux --pick-region')."
+        )
         self._active_backend = "cli"
         return "cli"
 
