@@ -48,6 +48,10 @@ SESSION_INTERFACE: Final[str] = "org.freedesktop.portal.Session"
 
 ShortcutBackend = Literal["portal", "cli"]
 
+# Batas waktu (detik) pemanggilan ``Session.Close`` agar shutdown tidak tertahan
+# portal yang hang (bawaan dbus-python menunggu hingga 25 detik).
+CLOSE_TIMEOUT_S: Final[float] = 2.0
+
 
 @dataclass(frozen=True)
 class ShortcutSpec:
@@ -67,6 +71,17 @@ class BoundShortcut:
     activation_token: str
 
 
+def _iter_shortcuts(items: object) -> list[tuple[str, dict]]:
+    """Urai daftar ``a(sa{sv})`` dari portal menjadi ``[(id, properti)]``; item rusak dilewati."""
+    parsed: list[tuple[str, dict]] = []
+    for item in items or []:  # type: ignore[union-attr]
+        try:
+            parsed.append((str(item[0]), dict(item[1])))
+        except (TypeError, IndexError, ValueError):
+            continue
+    return parsed
+
+
 class GlobalShortcutsPortal:
     """Klien protokol org.freedesktop.portal.GlobalShortcuts."""
 
@@ -74,7 +89,13 @@ class GlobalShortcutsPortal:
         self._bus = bus
         self._session_path: str | None = None
         self._activated_callbacks: list[Callable[[str], None]] = []
+        self._closed_callbacks: list[Callable[[str], None]] = []
+        self._changed_callbacks: list[Callable[[list[BoundShortcut]], None]] = []
         self._signal_match = None
+        # Langganan sesi: Closed, ShortcutsChanged, dan pemantau pemilik nama bus portal
+        self._session_matches: list = []
+        self._owner_watch = None
+        self._portal_owner_seen = False
 
     def _get_bus(self) -> dbus.Bus:
         if self._bus is None:
@@ -111,6 +132,119 @@ class GlobalShortcutsPortal:
                 cb(str(shortcut_id))
             except Exception as exc:
                 logger.error(f"Error pada callback Activated: {exc}")
+
+    def connect_closed(self, callback: Callable[[str], None]) -> None:
+        """Daftarkan callback saat sesi berakhir di luar kendali Pinux.
+
+        Argumen callback adalah alasan: ``REASON_SESSION_CLOSED`` (sinyal
+        ``Session.Closed`` dari desktop) atau ``REASON_PORTAL_STOPPED`` (layanan
+        portal berhenti/restart, yang tidak mengirim ``Closed``). Idempoten.
+        """
+        if callback not in self._closed_callbacks:
+            self._closed_callbacks.append(callback)
+
+    def connect_shortcuts_changed(self, callback: Callable[[list[BoundShortcut]], None]) -> None:
+        """Daftarkan callback saat pengguna mengubah pemicu pintasan di pengaturan sistem."""
+        if callback not in self._changed_callbacks:
+            self._changed_callbacks.append(callback)
+
+    def _watch_session(self) -> None:
+        """Pasang pemantau akhir-sesi dan perubahan pintasan; idempoten."""
+        if self._session_matches or self._owner_watch is not None or self._bus is None:
+            return
+        bus = self._bus
+        try:
+            self._session_matches.append(
+                bus.add_signal_receiver(
+                    self._on_session_closed,
+                    signal_name="Closed",
+                    dbus_interface=SESSION_INTERFACE,
+                    path=self._session_path,
+                )
+            )
+            self._session_matches.append(
+                bus.add_signal_receiver(
+                    self._on_shortcuts_changed,
+                    signal_name="ShortcutsChanged",
+                    dbus_interface=GLOBAL_SHORTCUTS_INTERFACE,
+                )
+            )
+            self._portal_owner_seen = False
+            self._owner_watch = bus.watch_name_owner(PORTAL_BUS_NAME, self._on_portal_owner_changed)
+        except Exception as exc:
+            logger.debug(f"Pemantauan sesi portal tidak dapat dipasang: {exc}")
+
+    def _unwatch_session(self) -> None:
+        """Lepas semua langganan sinyal sesi dan pemantau nama bus."""
+        matches, self._session_matches = self._session_matches, []
+        for match in matches:
+            try:
+                match.remove()
+            except Exception:
+                pass
+        watch, self._owner_watch = self._owner_watch, None
+        if watch is not None:
+            try:
+                watch.cancel()
+            except Exception:
+                pass
+
+    def _drop_session(self, reason: str) -> None:
+        """Sesi sudah mati di sisi portal: bersihkan state lokal lalu beri tahu pendengar."""
+        if self._session_path is None:
+            return  # sudah kita tutup sendiri atau sudah ditangani
+        logger.warning(f"Sesi portal GlobalShortcuts berakhir ({reason})")
+        self._session_path = None
+        if self._signal_match is not None and self._bus is not None:
+            try:
+                self._bus.remove_signal_receiver(
+                    self._on_activated,
+                    signal_name="Activated",
+                    dbus_interface=GLOBAL_SHORTCUTS_INTERFACE,
+                )
+            except Exception:
+                pass
+            self._signal_match = None
+        self._unwatch_session()
+        for cb in list(self._closed_callbacks):
+            try:
+                cb(reason)
+            except Exception as exc:
+                logger.error(f"Error pada callback Closed: {exc}")
+
+    def _on_session_closed(self, details: object = None) -> None:
+        self._drop_session(REASON_SESSION_CLOSED)
+
+    def _on_portal_owner_changed(self, new_owner: str) -> None:
+        """Pemilik nama bus portal berubah; ``new_owner`` kosong berarti portal berhenti.
+
+        dbus-python memanggil callback ini sekali segera dengan pemilik saat ini,
+        sehingga panggilan pertama hanya dicatat.
+        """
+        if new_owner:
+            self._portal_owner_seen = True
+            return
+        if self._portal_owner_seen:
+            self._drop_session(REASON_PORTAL_STOPPED)
+
+    def _on_shortcuts_changed(self, session_handle: object, shortcuts: object) -> None:
+        if self._session_path is None or str(session_handle) != self._session_path:
+            return
+        changed = [
+            BoundShortcut(
+                id=sid,
+                trigger=str(props.get("trigger_description") or ""),
+                activation_token=sid,
+            )
+            for sid, props in _iter_shortcuts(shortcuts)
+        ]
+        if not changed:
+            return
+        for cb in list(self._changed_callbacks):
+            try:
+                cb(changed)
+            except Exception as exc:
+                logger.error(f"Error pada callback ShortcutsChanged: {exc}")
 
     def _ensure_registered(self) -> None:
         """Daftarkan app_id pada org.freedesktop.host.portal.Registry bila tersedia."""
@@ -160,6 +294,7 @@ class GlobalShortcutsPortal:
             logger.info(f"CreateSession ditolak atau tanpa handle (kode {code})")
             return None
         self._session_path = str(handle)
+        self._watch_session()
         return self._session_path
 
     def bind(
@@ -229,11 +364,7 @@ class GlobalShortcutsPortal:
 
         wanted = {s.id: s for s in shortcuts}
         bound: list[BoundShortcut] = []
-        for item in results.get("shortcuts", []):
-            try:
-                sid, props = str(item[0]), dict(item[1])
-            except (TypeError, IndexError, ValueError):
-                continue
+        for sid, props in _iter_shortcuts(results.get("shortcuts", [])):
             if sid not in wanted:
                 continue
             trigger = str(props.get("trigger_description") or wanted[sid].preferred_trigger)
@@ -287,7 +418,12 @@ class GlobalShortcutsPortal:
         self.close()
 
     def close(self) -> None:
-        """Tutup sesi portal dan bersihkan listener sinyal."""
+        """Tutup sesi portal dan bersihkan listener sinyal.
+
+        Aman dipanggil berulang dan tidak pernah melempar galat. Pemanggilan
+        ``Session.Close`` dibatasi ``CLOSE_TIMEOUT_S`` dan tanpa introspeksi, agar
+        shutdown tidak tertahan portal yang hang.
+        """
         if self._signal_match is not None and self._bus is not None:
             try:
                 self._bus.remove_signal_receiver(
@@ -298,15 +434,15 @@ class GlobalShortcutsPortal:
             except Exception:
                 pass
             self._signal_match = None
+        self._unwatch_session()
 
-        if self._session_path and self._bus is not None:
+        session, self._session_path = self._session_path, None
+        if session and self._bus is not None:
             try:
-                session_obj = self._bus.get_object(PORTAL_BUS_NAME, self._session_path)
-                session_iface = dbus.Interface(session_obj, SESSION_INTERFACE)
-                session_iface.Close()
-            except Exception:
-                pass
-            self._session_path = None
+                session_obj = self._bus.get_object(PORTAL_BUS_NAME, session, introspect=False)
+                dbus.Interface(session_obj, SESSION_INTERFACE).Close(timeout=CLOSE_TIMEOUT_S)
+            except Exception as exc:
+                logger.debug(f"Session.Close gagal atau melebihi batas waktu: {exc}")
 
 
 _SPEC_DESCRIPTIONS: Final[dict[str, str]] = {
@@ -327,6 +463,8 @@ def specs_from_settings(shortcuts: dict[str, str]) -> tuple[ShortcutSpec, ...]:
 # Alasan pintasan portal tidak aktif (``ShortcutManager.last_reason``).
 REASON_PORTAL_UNAVAILABLE: Final[str] = "portal_unavailable"
 REASON_BIND_FAILED: Final[str] = "bind_failed"
+REASON_SESSION_CLOSED: Final[str] = "session_closed"
+REASON_PORTAL_STOPPED: Final[str] = "portal_stopped"
 
 # Opsi CLI yang setara dengan tiap id pintasan (R1.3).
 CLI_FLAGS: Final[dict[str, str]] = {
@@ -342,6 +480,14 @@ _FALLBACK_DESCRIPTIONS: Final[dict[str, str]] = {
     REASON_BIND_FAILED: (
         "Pintasan global tidak aktif: permintaan ke portal ditolak, dibatalkan, "
         "atau tidak dijawab. " + _FALLBACK_INTRO
+    ),
+    REASON_SESSION_CLOSED: (
+        "Sesi pintasan global ditutup oleh desktop. Mulai ulang Pinux untuk mengikat "
+        "ulang. " + _FALLBACK_INTRO
+    ),
+    REASON_PORTAL_STOPPED: (
+        "Layanan portal desktop berhenti atau dimulai ulang. Mulai ulang Pinux untuk "
+        "mengikat ulang. " + _FALLBACK_INTRO
     ),
 }
 
@@ -396,11 +542,56 @@ class ShortcutManager:
         self._active_backend: ShortcutBackend = "cli"
         self._bound_shortcuts: list[BoundShortcut] = []
         self._last_reason: str | None = None
+        self._changed_callbacks: list[Callable[[], None]] = []
 
     @property
     def active_backend(self) -> ShortcutBackend:
         """Backend aktif saat ini: 'portal' atau 'cli'."""
         return self._active_backend
+
+    def connect_changed(self, callback: Callable[[], None]) -> None:
+        """Daftarkan callback saat backend atau pemicu berubah setelah ``start()``.
+
+        Dipanggil bila sesi portal berakhir (backend turun ke 'cli') atau pengguna
+        mengubah pemicu di pengaturan sistem. Tidak dipanggil oleh ``start()`` dan
+        ``stop()`` sendiri. Idempoten.
+        """
+        if callback not in self._changed_callbacks:
+            self._changed_callbacks.append(callback)
+
+    def _notify_changed(self) -> None:
+        for cb in list(self._changed_callbacks):
+            try:
+                cb()
+            except Exception as exc:
+                logger.error(f"Error pada callback perubahan pintasan: {exc}")
+
+    def _on_portal_closed(self, reason: str) -> None:
+        """Sesi portal berakhir di luar kendali kita: turun ke CLI dengan alasan yang benar."""
+        if self._active_backend != "portal":
+            return
+        logger.warning(f"Pintasan portal tidak lagi aktif ({reason}). Beralih ke mode CLI.")
+        self._bound_shortcuts = []
+        self._active_backend = "cli"
+        self._last_reason = reason
+        self._notify_changed()
+
+    def _on_portal_shortcuts_changed(self, changed: Sequence[BoundShortcut]) -> None:
+        """Pengguna mengubah pemicu di pengaturan sistem: perbarui pemicu yang kita simpan."""
+        if self._active_backend != "portal":
+            return
+        new_triggers = {c.id: c.trigger for c in changed if c.trigger}
+        updated: list[BoundShortcut] = []
+        modified = False
+        for bound in self._bound_shortcuts:
+            trigger = new_triggers.get(bound.id)
+            if trigger and trigger != bound.trigger:
+                bound = BoundShortcut(id=bound.id, trigger=trigger, activation_token=bound.activation_token)
+                modified = True
+            updated.append(bound)
+        if modified:
+            self._bound_shortcuts = updated
+            self._notify_changed()
 
     @property
     def last_reason(self) -> str | None:
@@ -455,6 +646,8 @@ class ShortcutManager:
 
         if self._on_activated is not None:
             self._portal.connect_activated(self._on_activated)
+        self._portal.connect_closed(self._on_portal_closed)
+        self._portal.connect_shortcuts_changed(self._on_portal_shortcuts_changed)
 
         try:
             bound = self._portal.bind(self._specs)
@@ -477,9 +670,16 @@ class ShortcutManager:
         return "cli"
 
     def stop(self) -> None:
-        """Hentikan dan bersihkan manajer pintasan."""
+        """Hentikan dan bersihkan manajer pintasan.
+
+        Aman dipanggil berulang dan tidak melempar galat, agar pembersihan lain saat
+        shutdown tetap berjalan walau portal bermasalah.
+        """
         if self._portal is not None:
-            self._portal.close()
+            try:
+                self._portal.close()
+            except Exception as exc:
+                logger.warning(f"Penutupan sesi portal gagal saat stop: {exc}")
         self._bound_shortcuts = []
         self._active_backend = "cli"
         self._last_reason = None

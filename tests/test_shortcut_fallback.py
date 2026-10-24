@@ -36,6 +36,12 @@ class FakePortal:
     def connect_activated(self, callback) -> None:
         pass
 
+    def connect_closed(self, callback) -> None:
+        pass
+
+    def connect_shortcuts_changed(self, callback) -> None:
+        pass
+
     def bind(self, specs, parent_window: str = ""):
         if self.bind_error is not None:
             raise self.bind_error

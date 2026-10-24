@@ -27,6 +27,8 @@ class FakePortal:
         self.bind_error = bind_error
         self.calls: list[str] = []
         self.callbacks: list = []
+        self.closed_callbacks: list = []
+        self.changed_callbacks: list = []
         self.configure_args: list[str] = []
 
     def is_available(self) -> bool:
@@ -36,6 +38,14 @@ class FakePortal:
     def connect_activated(self, callback) -> None:
         self.calls.append("connect_activated")
         self.callbacks.append(callback)
+
+    def connect_closed(self, callback) -> None:
+        self.calls.append("connect_closed")
+        self.closed_callbacks.append(callback)
+
+    def connect_shortcuts_changed(self, callback) -> None:
+        self.calls.append("connect_shortcuts_changed")
+        self.changed_callbacks.append(callback)
 
     def bind(self, specs, parent_window: str = ""):
         self.calls.append("bind")

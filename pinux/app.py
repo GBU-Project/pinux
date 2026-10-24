@@ -646,7 +646,10 @@ class PinuxApp(Adw.Application):
     def do_shutdown(self) -> None:
         """Pelepasan resource saat aplikasi berhenti (R8.3)."""
         logger.info("Menghentikan Pinux...")
-        self.shortcut_manager.stop()
+        try:
+            self.shortcut_manager.stop()
+        except Exception as exc:  # pembersihan lain tetap harus berjalan
+            logger.warning(f"ShortcutManager gagal dihentikan: {exc}")
         self.tray_item.hide()
         self.scheduler.cancel_active()
         self.scheduler.shutdown(wait=False)
