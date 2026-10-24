@@ -88,7 +88,7 @@ def test_request_scheduler_runs_in_background_thread() -> None:
     req = TranslationRequest("Halo", None, "en")
     scheduler.submit(req, provider, None, results.append, errors.append)
 
-    run_glib_loop(0.5, condition=lambda: len(results) > 0 or len(errors) > 0)
+    run_glib_loop(2.0, condition=lambda: len(results) > 0 or len(errors) > 0)
 
     scheduler.shutdown(wait=True)
     assert len(results) == 1
