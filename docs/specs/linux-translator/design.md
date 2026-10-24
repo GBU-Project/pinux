@@ -138,7 +138,7 @@ Proses utama menjalankan GTK main loop dan tetap non-blokir. Aturan yang berlaku
 2. Hasil dari worker dikirim ke thread utama melalui `GLib.idle_add`.
 3. Setiap permintaan menerima `CancelToken`. Permintaan baru membatalkan permintaan yang belum selesai.
 4. Proses pekerja OCR dijalankan satu kali secara lazy pada OCR pertama dan dihentikan setelah 5 menit tanpa aktivitas.
-5. Panggilan D-Bus portal dijalankan pada thread utama dengan timeout, kecuali `Screenshot` yang dijalankan pada worker thread karena portal menampilkan dialog izin.
+5. Panggilan D-Bus portal dijalankan pada thread utama dengan timeout, kecuali panggilan yang menampilkan dialog izin: `Screenshot` dan `BindShortcuts` (lewat `ShortcutManager.start_async()`) dijalankan pada worker thread. Callback sinyal dbus, perubahan keadaan `ShortcutManager`, callback `connect_changed`, dan `on_done` tetap berjalan pada thread utama melalui `GLib.idle_add`. `ShortcutManager.start()` sinkron tetap tersedia, tetapi dari thread utama ia memutar loop bersarang hingga 120 detik sehingga aplikasi memakai `start_async()`. `stop()` membatalkan pengikatan yang sedang berjalan; hasilnya dibuang dan sesi yang sempat dibuka ditutup.
 
 ## Components and Interfaces
 

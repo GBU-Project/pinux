@@ -38,7 +38,7 @@ Ketersediaan tersebut tidak menjamin perilaku yang sama pada desktop lain. Setia
 
 1. Periksa kepemilikan nama D-Bus tujuan sebelum memanggil, lalu beralih ke jalur fallback bila tidak ada.
 2. Tangani sinyal `Response` beserta nilai hasilnya, termasuk penolakan oleh pengguna.
-3. Jalankan pemanggilan yang memunculkan dialog izin pada worker thread, bukan thread utama.
+3. Jalankan pemanggilan yang memunculkan dialog izin pada worker thread, bukan thread utama. Untuk `BindShortcuts` gunakan `ShortcutManager.start_async()`; `start()` sinkron memutar loop bersarang pada thread utama (hingga 120 detik) dan hanya untuk pemanggil di luar UI.
 4. Tutup sesi portal pada saat Pinux berhenti.
 
 ## Sesi Portal GlobalShortcuts

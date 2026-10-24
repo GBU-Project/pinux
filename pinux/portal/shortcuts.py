@@ -18,12 +18,14 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import threading
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
 import dbus
+from gi.repository import GLib
 
 from pinux import APP_ID
 from pinux.portal.request import portal_request
@@ -552,6 +554,9 @@ class ShortcutManager:
         # Keadaan yang terakhir dilihat pendengar; None setelah stop() atau sebelum
         # pemberitahuan pertama, sehingga start() berikutnya selalu memberi tahu.
         self._ui_snapshot: tuple | None = None
+        # Pengikatan asinkron (start_async): token mengenali permintaan yang sudah
+        # dibatalkan stop(); None berarti tidak ada pengikatan yang sedang berjalan.
+        self._async_token: object | None = None
 
     @property
     def active_backend(self) -> ShortcutBackend:
@@ -655,7 +660,7 @@ class ShortcutManager:
         self._bound_shortcuts = []
 
     def start(self) -> ShortcutBackend:
-        """Mulai manajer pintasan.
+        """Mulai manajer pintasan secara sinkron.
 
         Mengembalikan 'portal' jika portal berhasil diikat, atau 'cli' jika gagal/tidak tersedia.
         Idempoten saat backend portal sudah aktif: pemanggilan ulang tidak membuka
@@ -664,16 +669,84 @@ class ShortcutManager:
         Callback ``connect_changed`` dipanggil bila keadaan berubah. Selama pengikatan
         berjalan ``last_reason`` bernilai ``REASON_PENDING`` dan pendengar diberi tahu
         lebih dulu, sehingga UI dapat menampilkan "menunggu persetujuan" saat dialog
-        desktop terbuka (loop bersarang tetap memproses UI).
+        desktop terbuka.
+
+        Bila dipanggil dari thread utama, pemanggilan ini memutar loop bersarang hingga
+        dialog desktop selesai (maks. 120 dtk); aplikasi sebaiknya memakai
+        :meth:`start_async`. Bila pengikatan asinkron sedang berjalan, tidak melakukan
+        apa pun dan mengembalikan backend saat ini.
         """
-        backend = self._start()
+        if self._async_token is not None:
+            return self._active_backend
+        backend = self._begin()
+        if backend is None:
+            backend = self._complete(*self._bind_blocking())
+        self._notify_if_changed()
+        return backend
+
+    def start_async(self, on_done: Callable[[ShortcutBackend], None] | None = None) -> bool:
+        """Mulai manajer tanpa memblokir thread utama.
+
+        Menunggu dialog persetujuan desktop (bisa berlangsung lama) dilakukan pada
+        worker thread, sehingga UI tetap responsif tanpa loop bersarang. Keadaan
+        manajer, callback ``connect_changed``, dan ``on_done(backend)`` selalu
+        dijalankan pada thread utama (lewat ``GLib.idle_add``); panggil dari thread utama.
+
+        Mengembalikan ``False`` bila pengikatan asinkron sudah berjalan (pemanggilan
+        diabaikan, ``on_done`` tidak dipanggil). Bila tidak perlu menunggu portal
+        (sudah aktif, atau portal tidak tersedia) hasil langsung tersedia dan
+        ``on_done`` dipanggil sebelum fungsi kembali. ``stop()`` membatalkan
+        pengikatan yang sedang berjalan: hasilnya dibuang dan sesi yang mungkin sempat
+        dibuka ditutup.
+        """
+        if self._async_token is not None:
+            return False
+        backend = self._begin()
+        if backend is not None:
+            self._notify_if_changed()
+            self._call_done(on_done, backend)
+            return True
+
+        token = object()
+        self._async_token = token
+
+        def _worker() -> None:
+            outcome = self._bind_blocking()
+            GLib.idle_add(_finish, outcome)
+
+        def _finish(outcome: tuple[list[BoundShortcut] | None, Exception | None]) -> bool:
+            if self._async_token is not token:
+                # stop() membatalkan permintaan ini: buang hasilnya dan tutup sesi yatim,
+                # kecuali pengikatan baru sudah berjalan (sesi itu bukan yatim lagi).
+                if self._async_token is None:
+                    self._close_portal_quietly()
+                return False
+            self._async_token = None
+            result = self._complete(*outcome)
+            self._notify_if_changed()
+            self._call_done(on_done, result)
+            return False
+
+        threading.Thread(target=_worker, name="pinux-bind-shortcuts", daemon=True).start()
+        return True
+
+    @staticmethod
+    def _call_done(on_done: Callable[[ShortcutBackend], None] | None, backend: ShortcutBackend) -> None:
+        if on_done is None:
+            return
+        try:
+            on_done(backend)
+        except Exception as exc:
+            logger.error(f"Error pada callback selesai start_async: {exc}")
+
+    def _notify_if_changed(self) -> None:
         # Bandingkan dengan yang terakhir diberitahukan (bukan keadaan sebelum start),
         # agar kembali dari "menunggu" ke hasil yang sama dengan sebelumnya tetap diberi tahu.
         if self._snapshot() != self._ui_snapshot:
             self._notify_changed()
-        return backend
 
-    def _start(self) -> ShortcutBackend:
+    def _begin(self) -> ShortcutBackend | None:
+        """Tahap awal (thread utama): kembalikan backend final, atau ``None`` bila perlu bind."""
         if self._active_backend == "portal" and self._bound_shortcuts:
             return "portal"
 
@@ -690,15 +763,24 @@ class ShortcutManager:
 
         self._last_reason = REASON_PENDING
         self._notify_changed()
+        return None
+
+    def _bind_blocking(self) -> tuple[list[BoundShortcut] | None, Exception | None]:
+        """Ikat pintasan (memblokir); aman dijalankan pada worker thread, tidak mengubah keadaan."""
         try:
-            bound = self._portal.bind(self._specs)
-            if bound:
-                self._bound_shortcuts = bound
-                self._active_backend = "portal"
-                self._last_reason = None
-                return "portal"
+            return self._portal.bind(self._specs), None
         except Exception as exc:
-            logger.info(f"Pintasan portal tidak aktif ({exc}). Beralih ke mode CLI.")
+            return None, exc
+
+    def _complete(self, bound: list[BoundShortcut] | None, error: Exception | None) -> ShortcutBackend:
+        """Tahap akhir (thread utama): terapkan hasil pengikatan pada keadaan manajer."""
+        if error is not None:
+            logger.info(f"Pintasan portal tidak aktif ({error}). Beralih ke mode CLI.")
+        elif bound:
+            self._bound_shortcuts = bound
+            self._active_backend = "portal"
+            self._last_reason = None
+            return "portal"
 
         # Fallback ke CLI mode jika ditolak pengguna atau error; sesi ditutup dahulu
         self._release_portal()
@@ -710,12 +792,19 @@ class ShortcutManager:
         self._last_reason = REASON_BIND_FAILED
         return "cli"
 
+    def _close_portal_quietly(self) -> None:
+        try:
+            self._portal.close()
+        except Exception as exc:
+            logger.debug(f"Penutupan sesi portal yang dibatalkan bermasalah: {exc}")
+
     def stop(self) -> None:
         """Hentikan dan bersihkan manajer pintasan.
 
         Aman dipanggil berulang dan tidak melempar galat, agar pembersihan lain saat
         shutdown tetap berjalan walau portal bermasalah.
         """
+        self._async_token = None  # batalkan pengikatan asinkron yang masih berjalan
         if self._portal is not None:
             try:
                 self._portal.close()

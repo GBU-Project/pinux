@@ -613,7 +613,7 @@ class PinuxApp(Adw.Application):
 
     def _start_shortcuts(self) -> bool:
         try:
-            self.shortcut_manager.start()
+            self.shortcut_manager.start_async()  # dialog desktop tidak boleh memblokir UI
         except Exception as exc:
             logger.warning(f"ShortcutManager gagal dimulai: {exc}")
         return False  # sekali jalan

@@ -197,3 +197,23 @@ def test_show_settings_window_selects_requested_page(tmp_path: Path, monkeypatch
     app.show_settings_window(page="shortcuts")
     assert win.pages == ["shortcuts"] and win.presented == 2
     assert len(FakeSettings.instances) == 1, "jendela yang sama dipakai ulang"
+
+
+# --- Medium 8: startup memakai pengikatan asinkron --------------------------------------
+
+
+def test_start_shortcuts_uses_async_start(tmp_path: Path) -> None:
+    app, manager, _portal = _real_chain(tmp_path)
+    manager.start = MagicMock(side_effect=AssertionError("start() sinkron memblokir UI"))
+    manager.start_async = MagicMock(return_value=True)
+
+    assert app._start_shortcuts() is False  # sekali jalan untuk GLib.idle_add
+
+    manager.start_async.assert_called_once_with()
+
+
+def test_start_shortcuts_contains_failure(tmp_path: Path) -> None:
+    app, manager, _portal = _real_chain(tmp_path)
+    manager.start_async = MagicMock(side_effect=RuntimeError("rusak"))
+
+    assert app._start_shortcuts() is False  # tidak melempar
