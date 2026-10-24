@@ -17,6 +17,7 @@ Perujuk: R1.4, R1.5, R2.4, R4.3, R5.1, R5.2, R5.3, R5.4, R5.5, R5.6.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -46,8 +47,42 @@ class SourceTextView(Gtk.TextView):
         self.get_buffer().set_text(text)
 
 
+class SnapScrolledWindow(Gtk.ScrolledWindow):
+    """ScrolledWindow yang memotong area isi di batas baris penuh saat isi meluap.
+
+    Kartu (latar dan bingkai) tetap mengisi seluruh alokasi, sedangkan area gulir
+    di dalamnya diperpendek sehingga baris terakhir yang terlihat tidak terpotong;
+    sisanya (kurang dari satu baris) menjadi ruang kosong di dalam kartu.
+
+    ``snap_provider`` mengembalikan ``(offset_atas, tinggi_baris, tinggi_isi)`` dalam
+    piksel, atau ``None`` bila pemotongan tidak berlaku (isi muat, atau isi bercampur
+    baris berukuran berbeda).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.snap_provider: Callable[[int], tuple[int, float, int] | None] | None = None
+
+    def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
+        allocated = height
+        info = self.snap_provider(width) if self.snap_provider is not None else None
+        if info is not None and height > 0:
+            top, line_height, content_height = info
+            if line_height > 0 and content_height > height:
+                lines = int((height - top) // line_height)
+                if lines >= 1:
+                    snapped = math.ceil(top + lines * line_height)
+                    minimum = self.measure(Gtk.Orientation.VERTICAL, width)[0]
+                    allocated = min(height, max(snapped, minimum))
+        Gtk.ScrolledWindow.do_size_allocate(self, width, allocated, baseline)
+
+
 class PopupWindow(Gtk.Window):
     """Jendela popup terjemahan GTK4."""
+
+    #: Batas tinggi (px) kotak teks sumber; di atas batas atas teks digulir.
+    SOURCE_MIN_HEIGHT = 70
+    SOURCE_MAX_HEIGHT = 140
 
     #: Jeda (ms) setelah ketukan terakhir sebelum terjemahan dikirim.
     LANGUAGES: list[tuple[str, str]] = [
@@ -238,6 +273,9 @@ class PopupWindow(Gtk.Window):
         # Input Source_Text (multi-baris)
         self._entry = SourceTextView()
         self._entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        # Padding atas/bawah agar baris pertama dan terakhir tidak menempel ke tepi kartu
+        self._entry.set_top_margin(6)
+        self._entry.set_bottom_margin(6)
         self._entry.set_accepts_tab(False)
         self._entry.set_tooltip_text("Ketik atau sorot teks. Enter: terjemahkan, Shift+Enter: baris baru")
         self._entry.get_buffer().connect("changed", self._on_entry_changed)
@@ -251,11 +289,19 @@ class PopupWindow(Gtk.Window):
             Gtk.PolicyType.AUTOMATIC,
         )
         self._entry_scroller.set_child(self._entry)
-        self._entry_scroller.set_min_content_height(70)
-        self._entry_scroller.set_max_content_height(140)
+        self._entry_scroller.set_min_content_height(self.SOURCE_MIN_HEIGHT)
+        self._entry_scroller.set_max_content_height(self.SOURCE_MAX_HEIGHT)
         self._entry_scroller.set_propagate_natural_height(True)
         self._entry_scroller.add_css_class("card")
         source_container.append(self._entry_scroller)
+
+        # Tinggi kotak sumber tidak mengikuti isi (teks terpotong di tengah baris),
+        # sehingga disesuaikan sendiri saat teks atau lebar berubah.
+        self._fit_source_id: int | None = None
+        self._entry.get_buffer().connect("changed", lambda *_: self._queue_fit_source_height())
+        self._entry_scroller.get_hadjustment().connect(
+            "notify::page-size", lambda *_: self._queue_fit_source_height()
+        )
 
         main_box.append(source_container)
 
@@ -300,6 +346,7 @@ class PopupWindow(Gtk.Window):
 
         # Isi kartu hasil yang dapat discroll
         result_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._result_box = result_box
         result_box.set_margin_top(8)
         result_box.set_margin_bottom(8)
         result_box.set_margin_start(10)
@@ -342,7 +389,8 @@ class PopupWindow(Gtk.Window):
         self._error_label.set_visible(False)
         result_box.append(self._error_label)
 
-        self._result_scroller = Gtk.ScrolledWindow()
+        self._result_scroller = SnapScrolledWindow()
+        self._result_scroller.snap_provider = self._result_snap_info
         self._result_scroller.set_policy(
             Gtk.PolicyType.NEVER,
             Gtk.PolicyType.AUTOMATIC,
@@ -505,6 +553,67 @@ class PopupWindow(Gtk.Window):
                 self._fire_text_changed(self._entry.get_text())
             return True
         return False
+
+    def _result_snap_info(self, width: int) -> tuple[int, float, int] | None:
+        """Data pemotongan baris untuk kotak hasil, atau ``None`` bila tidak berlaku.
+
+        Hanya untuk hasil biasa: fonetik, kamus, dan galat memiliki baris dengan
+        tinggi berbeda sehingga batas barisnya tidak bisa dihitung dari satu label.
+        """
+        if (
+            self._phonetic_label.get_visible()
+            or self._dict_box.get_visible()
+            or self._error_label.get_visible()
+        ):
+            return None
+        label = self._result_label
+        layout = label.get_layout()
+        lines = layout.get_line_count()
+        if lines < 1 or not label.get_visible():
+            return None
+        # Pango menyimpan ukuran dalam satuan Pango.SCALE (1024 unit per piksel)
+        pango_h = layout.get_size()[1]
+        line_height = max(12.0, (pango_h / Pango.SCALE) / float(lines))
+        box = self._result_box
+        _, content_height, _, _ = box.measure(Gtk.Orientation.VERTICAL, width)
+        return box.get_margin_top(), line_height, content_height
+
+    def _queue_fit_source_height(self) -> None:
+        """Jadwalkan penyesuaian batas tinggi kotak sumber setelah tata letak teks selesai."""
+        if self._fit_source_id is None:
+            self._fit_source_id = GLib.idle_add(self._fit_source_height)
+
+    def _source_max_height(self) -> int:
+        """Batas tinggi atas (px) kotak sumber untuk teks saat ini.
+
+        Selama teks muat dalam ``SOURCE_MAX_HEIGHT``, kotak mengikuti tinggi natural
+        teks. Bila harus digulir, batasnya diturunkan ke kelipatan baris penuh agar
+        baris terakhir tidak terpotong; margin bawah tidak disertakan karena akan
+        memperlihatkan sepotong baris berikutnya.
+
+        CATATAN: Kalkulasi ini mengandalkan margin bawaan Gtk.TextView (top_margin &
+        bottom_margin), bukan padding CSS luar.
+        """
+        view = self._entry
+        end = view.get_iter_location(view.get_buffer().get_end_iter())
+        top = view.get_top_margin()
+        bottom = view.get_bottom_margin()
+        line_h = max(end.height, 14)  # fallback ke tinggi baris minimum bila teks/emoji bervariasi
+        needed = end.y + line_h + top + bottom
+        if needed <= self.SOURCE_MAX_HEIGHT or line_h <= 0:
+            return self.SOURCE_MAX_HEIGHT
+        visible_lines = max(1, (self.SOURCE_MAX_HEIGHT - top) // line_h)
+        return max(self.SOURCE_MIN_HEIGHT, top + visible_lines * line_h)
+
+    def _fit_source_height(self) -> bool:
+        """Terapkan ``_source_max_height`` pada kotak sumber."""
+        self._fit_source_id = None
+        if self._entry.get_width() <= 0:
+            return GLib.SOURCE_REMOVE  # belum dialokasikan; perubahan lebar memicu ulang
+        cap = self._source_max_height()
+        if cap != self._entry_scroller.get_max_content_height():
+            self._entry_scroller.set_max_content_height(cap)
+        return GLib.SOURCE_REMOVE
 
     def _on_entry_changed(self, buffer: Any) -> None:
         if self._ignore_text_changes:
