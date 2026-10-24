@@ -687,11 +687,20 @@ class PinuxApp(Adw.Application):
                 close_on_blur=self.settings.popup.close_on_blur,
                 continuous_ocr_default=self.settings.ocr.continuous_ocr,
                 on_continuous_ocr_toggled=lambda val: self._on_continuous_ocr_toggled(val),
+                on_expand=self.show_translation_window,
                 width=self.settings.popup.width,
             )
             # Setel bahasa awal sesuai pengaturan
             self._popup_window.set_languages_display("auto", self.settings.target_language)
         return self._popup_window
+
+    def show_translation_window(self, source_text: str, result_text: str) -> None:
+        """Tampilkan TranslationWindow terpisah untuk teks panjang."""
+        from pinux.ui.translation_window import TranslationWindow
+
+        win = TranslationWindow(source_text, result_text)
+        win.set_application(self)
+        win.present()
 
     def _on_continuous_ocr_toggled(self, active: bool) -> None:
         self.settings.ocr.continuous_ocr = active

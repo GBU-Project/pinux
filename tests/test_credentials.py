@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import assume, given, strategies as st
 
 from pinux.config import Settings
 from pinux.configstore import ConfigStore
@@ -165,6 +165,8 @@ def test_property_6_credentials_do_not_leak_into_pinux_toml(
     secret: str,
 ) -> None:
     """Properti 6: Kredensial tidak pernah bocor ke berkas pinux.toml."""
+    # Abaikan jika secret yang di-generate secara acak kebetulan substring dari kata kunci konfigurasi standar (seperti 'unwrap_lines' dll)
+    assume(secret not in "unwrap_lines remove_hyphens remove_comments auto_copy_result localhost")
     test_dir = tmp_path_factory.mktemp("prop6")
     config_file = test_dir / "pinux.toml"
     creds_file = test_dir / "credentials.toml"

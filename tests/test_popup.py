@@ -389,8 +389,8 @@ def test_popup_window_ui_panels_and_scroller() -> None:
     assert hasattr(popup, "_result_scroller")
     assert isinstance(popup._result_scroller, Gtk.ScrolledWindow)
     assert popup._result_scroller.get_min_content_height() == 80
-    assert popup._result_scroller.get_max_content_height() == 600
-    assert popup._result_scroller.get_propagate_natural_height() is True
+    assert popup._result_scroller.get_max_content_height() == 320
+    assert popup._result_scroller.get_propagate_natural_height() is False
 
     # P2: Tombol jendela penuh
     assert hasattr(popup, "_expand_button")

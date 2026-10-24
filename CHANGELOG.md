@@ -32,6 +32,10 @@
  - Default endpoint LLM dialihkan dari OpenAI ke Ollama lokal agar pengguna dapat langsung memakai fitur AI tanpa konfigurasi API key berbayar.
  - Penanganan galat soket level rendah (`OSError`) pada client HTTP kini dipetakan dengan aman ke `TranslationError("network", ...)`.
  
+ ### Diperbaiki
+ - **Sizing & Scrolling Popup**: Memperbaiki masalah jendela popup melebar horizontal secara berlebihan akibat teks fonetik/pinyin panjang tanpa wrapping, serta mengaktifkan scroll vertikal yang mulus pada kontainer hasil terjemahan dan jendela terjemahan penuh (`TranslationWindow`).
+ - **Text-to-Speech (TTS)**: Memperbaiki pemanggilan pembatalan daemon `spd-say` agar terisolasi saat ada proses aktif.
+ 
  ---
  
  ## [0.2.0] - 2026-10-19

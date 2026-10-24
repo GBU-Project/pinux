@@ -24,7 +24,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gdk, GLib, Gtk
+gi.require_version("Pango", "1.0")
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 if TYPE_CHECKING:
     from pinux.translate.base import TranslationResult
@@ -87,6 +88,7 @@ class PopupWindow(Gtk.Window):
         close_on_blur: bool = True,
         continuous_ocr_default: bool = False,
         on_continuous_ocr_toggled: Callable[[bool], None] | None = None,
+        on_expand: Callable[[str, str], None] | None = None,
         width: int = 420,
     ) -> None:
         super().__init__()
@@ -99,6 +101,7 @@ class PopupWindow(Gtk.Window):
         self._on_trigger_ocr = on_trigger_ocr
         self._on_ocr_file = on_ocr_file
         self._on_continuous_ocr_toggled = on_continuous_ocr_toggled
+        self._on_expand = on_expand
         self._on_speak = on_speak
         self._on_stop_speak = on_stop_speak
         self._is_speaking_source: bool = False
@@ -121,9 +124,10 @@ class PopupWindow(Gtk.Window):
         self._current_target_lang: str = "id"
 
         # Pengaturan jendela
+        self._default_width: int = width
         self.set_decorated(False)
         self.set_resizable(True)
-        self.set_default_size(width, 480)
+        self.set_default_size(self._default_width, 420)
         self.add_css_class("pinux-popup-window")
 
         self._build_ui()
@@ -154,6 +158,8 @@ class PopupWindow(Gtk.Window):
     def _build_ui(self) -> None:
         """Bangun hierarki widget popup."""
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        main_box.set_size_request(self._default_width, -1)
+        main_box.set_hexpand(False)
         main_box.set_margin_top(12)
         main_box.set_margin_bottom(12)
         main_box.set_margin_start(14)
@@ -240,9 +246,13 @@ class PopupWindow(Gtk.Window):
         self._entry.add_controller(entry_keys)
 
         self._entry_scroller = Gtk.ScrolledWindow()
+        self._entry_scroller.set_policy(
+            Gtk.PolicyType.NEVER,
+            Gtk.PolicyType.AUTOMATIC,
+        )
         self._entry_scroller.set_child(self._entry)
-        self._entry_scroller.set_min_content_height(56)
-        self._entry_scroller.set_max_content_height(160)
+        self._entry_scroller.set_min_content_height(70)
+        self._entry_scroller.set_max_content_height(140)
         self._entry_scroller.set_propagate_natural_height(True)
         self._entry_scroller.add_css_class("card")
         source_container.append(self._entry_scroller)
@@ -297,6 +307,9 @@ class PopupWindow(Gtk.Window):
 
         # Label Fonetik / Simbol Lafal (Kamus ala Bob)
         self._phonetic_label = Gtk.Label(label="")
+        self._phonetic_label.set_wrap(True)
+        self._phonetic_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._phonetic_label.set_max_width_chars(45)
         self._phonetic_label.set_xalign(0.0)
         self._phonetic_label.add_css_class("caption")
         self._phonetic_label.add_css_class("dim-label")
@@ -306,6 +319,8 @@ class PopupWindow(Gtk.Window):
         # Label Hasil Terjemahan
         self._result_label = Gtk.Label(label="")
         self._result_label.set_wrap(True)
+        self._result_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._result_label.set_max_width_chars(45)
         self._result_label.set_selectable(True)
         self._result_label.set_xalign(0.0)
         self._result_label.set_yalign(0.0)
@@ -320,16 +335,22 @@ class PopupWindow(Gtk.Window):
         # Label Galat
         self._error_label = Gtk.Label(label="")
         self._error_label.set_wrap(True)
+        self._error_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._error_label.set_max_width_chars(45)
         self._error_label.set_xalign(0.0)
         self._error_label.add_css_class("error")
         self._error_label.set_visible(False)
         result_box.append(self._error_label)
 
         self._result_scroller = Gtk.ScrolledWindow()
+        self._result_scroller.set_policy(
+            Gtk.PolicyType.NEVER,
+            Gtk.PolicyType.AUTOMATIC,
+        )
         self._result_scroller.set_child(result_box)
         self._result_scroller.set_min_content_height(80)
-        self._result_scroller.set_max_content_height(600)
-        self._result_scroller.set_propagate_natural_height(True)
+        self._result_scroller.set_max_content_height(320)
+        self._result_scroller.set_propagate_natural_height(False)
         self._result_scroller.set_vexpand(True)
         self._result_scroller.add_css_class("card")
         result_container.append(self._result_scroller)
@@ -605,10 +626,15 @@ class PopupWindow(Gtk.Window):
         result = self._current_result_text
         if not result and not source:
             return
-        from pinux.ui.translation_window import TranslationWindow
 
-        win = TranslationWindow(source, result)
-        win.present()
+        if self._on_expand is not None:
+            self._on_expand(source, result)
+        else:
+            from pinux.ui.translation_window import TranslationWindow
+
+            win = TranslationWindow(source, result)
+            win.present()
+
         if not self._pinned:
             self.hide()
 
@@ -632,13 +658,16 @@ class PopupWindow(Gtk.Window):
                         if wa and wa.width > 0 and wa.height > 0:
                             workarea = wa
 
-                    # Batasi tinggi scroller bila monitor beresolusi rendah / jendela mendekati batas layar
+                    # Batasi tinggi scroller agar proporsional dan tidak mendorong jendela keluar layar
                     avail_h = workarea.height - (2 * offset)
                     if hasattr(self, "_result_scroller") and avail_h > 200:
-                        max_res_h = min(600, max(120, avail_h - 220))
+                        max_res_h = min(360, max(140, avail_h - 380))
                         self._result_scroller.set_max_content_height(max_res_h)
         except Exception as exc:
             logger.debug(f"Pengecekan workarea monitor dilewati: {exc}")
+
+        # Pastikan ukuran lebar & tinggi kembali proporsional sesuai pengaturan (misal 420x420px)
+        self.set_default_size(self._default_width, 420)
 
         # Tampilkan dan fokuskan jendela
         self.present()
@@ -767,10 +796,14 @@ class PopupWindow(Gtk.Window):
                 err_lbl.add_css_class("error")
                 err_lbl.set_xalign(0.0)
                 err_lbl.set_wrap(True)
+                err_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                err_lbl.set_max_width_chars(45)
                 card.append(err_lbl)
             else:
                 body_lbl = Gtk.Label(label=alt.text)
                 body_lbl.set_wrap(True)
+                body_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                body_lbl.set_max_width_chars(45)
                 body_lbl.set_selectable(True)
                 body_lbl.set_xalign(0.0)
                 card.append(body_lbl)
@@ -819,6 +852,8 @@ class PopupWindow(Gtk.Window):
                     terms_lbl.add_css_class("caption")
                     terms_lbl.add_css_class("dim-label")
                     terms_lbl.set_wrap(True)
+                    terms_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                    terms_lbl.set_max_width_chars(40)
                     terms_lbl.set_xalign(0.0)
                     terms_lbl.set_hexpand(True)
                     row.append(terms_lbl)

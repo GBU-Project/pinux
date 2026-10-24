@@ -135,20 +135,21 @@ class TtsEngine:
 
             threading.Thread(target=_reap_proc, args=(proc,), daemon=True).start()
 
-        # Pada backend spd-say, proses klien spd-say hanya mengirim pesan ke daemon speech-dispatcher.
-        # Untuk menghentikan suara audio yang sedang dimainkan oleh daemon:
-        if self._backend is not None and self._backend[0] == "spd-say":
-            def _cancel_spd() -> None:
-                try:
-                    subprocess.run(
-                        [self._binary or "spd-say", "-C"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=1,
-                        check=False,
-                    )
-                except Exception:
-                    pass
+            # Pada backend spd-say, proses klien spd-say hanya mengirim pesan ke daemon speech-dispatcher.
+            # Untuk menghentikan suara audio yang sedang dimainkan oleh daemon:
+            if self._backend is not None and self._backend[0] == "spd-say":
+                def _cancel_spd() -> None:
+                    try:
+                        subprocess.run(
+                            [self._binary or "spd-say", "-C"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=1,
+                            check=False,
+                        )
+                    except Exception:
+                        pass
 
-            threading.Thread(target=_cancel_spd, daemon=True).start()
+                threading.Thread(target=_cancel_spd, daemon=True).start()
+
 

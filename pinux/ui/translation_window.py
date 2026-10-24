@@ -10,7 +10,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk, Gtk
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, Gdk, Gtk, Pango
 
 
 class TranslationWindow(Adw.Window):
@@ -49,6 +50,10 @@ class TranslationWindow(Adw.Window):
         main_box.append(src_header)
 
         src_scroll = Gtk.ScrolledWindow()
+        src_scroll.set_policy(
+            Gtk.PolicyType.NEVER,
+            Gtk.PolicyType.AUTOMATIC,
+        )
         src_scroll.set_min_content_height(70)
         src_scroll.set_max_content_height(180)
         src_scroll.set_propagate_natural_height(True)
@@ -56,6 +61,7 @@ class TranslationWindow(Adw.Window):
 
         # Teks sumber tanpa class dim-label agar kontras terang dan mudah dibaca
         self._src_label = Gtk.Label(label=source_text, wrap=True, selectable=True)
+        self._src_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self._src_label.set_xalign(0.0)
         self._src_label.set_margin_top(10)
         self._src_label.set_margin_bottom(10)
@@ -76,10 +82,15 @@ class TranslationWindow(Adw.Window):
         main_box.append(res_header)
 
         res_scroll = Gtk.ScrolledWindow()
+        res_scroll.set_policy(
+            Gtk.PolicyType.NEVER,
+            Gtk.PolicyType.AUTOMATIC,
+        )
         res_scroll.set_vexpand(True)
         res_scroll.add_css_class("card")
 
         self._res_label = Gtk.Label(label=result_text, wrap=True, selectable=True)
+        self._res_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self._res_label.set_xalign(0.0)
         self._res_label.set_yalign(0.0)
         self._res_label.set_margin_top(12)
