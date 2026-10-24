@@ -405,36 +405,46 @@ def test_shortcuts_changed_ignores_unknown_same_and_empty() -> None:
     assert {b.id: b.trigger for b in manager.bound_shortcuts}["translate"] == "Ctrl+Alt+T"
 
 
-def test_changed_fired_by_start_only_when_state_changes_and_errors_are_contained() -> None:
-    manager, portal, notified = _manager()
-    manager.connect_changed(lambda: (_ for _ in ()).throw(RuntimeError("rusak")))
+def _record_states(manager: ShortcutManager) -> list[tuple[str, str | None]]:
+    """Daftarkan pendengar yang mencatat (backend, alasan) tiap kali UI diberi tahu."""
+    states: list[tuple[str, str | None]] = []
+    manager.connect_changed(lambda: states.append((manager.active_backend, manager.last_reason)))
+    return states
 
-    manager.start()  # cli -> portal: berubah (callback rusak tidak boleh menghentikan yang lain)
-    assert notified == [1]
+
+def test_changed_fired_by_start_only_when_state_changes_and_errors_are_contained() -> None:
+    manager, portal, _ = _manager()
+    manager.connect_changed(lambda: (_ for _ in ()).throw(RuntimeError("rusak")))
+    states = _record_states(manager)  # callback rusak tidak boleh menghentikan yang lain
+
+    manager.start()  # cli -> menunggu -> portal
+    assert states == [("cli", sc.REASON_PENDING), ("portal", None)]
 
     manager.start()  # idempoten: tidak ada perubahan
-    assert notified == [1]
+    assert len(states) == 2
 
     manager.stop()  # shutdown tidak memberi tahu UI
-    assert notified == [1]
+    assert len(states) == 2
 
-    manager.start()  # setelah stop, kembali ke portal: berubah lagi
-    assert notified == [1, 1]
+    manager.start()  # setelah stop, kembali ke portal: UI diberi tahu lagi
+    assert states[2:] == [("cli", sc.REASON_PENDING), ("portal", None)]
 
     portal.closed_cb(sc.REASON_SESSION_CLOSED)
-    assert notified == [1, 1, 1]
+    assert states[-1] == ("cli", sc.REASON_SESSION_CLOSED)
 
 
-def test_start_notifies_when_bind_fails_and_not_on_identical_retry() -> None:
+def test_start_notifies_pending_then_result_even_when_retry_ends_the_same() -> None:
     portal = ManagerPortal(bound=[])  # bind kosong -> CLI dengan alasan bind_failed
-    manager, _, notified = _manager(portal)
+    manager, _, _ = _manager(portal)
+    states = _record_states(manager)
 
     manager.start()
-    assert manager.last_reason == sc.REASON_BIND_FAILED
-    assert notified == [1], "UI yang dibuka sebelum start() selesai harus diberi tahu"
+    assert states == [("cli", sc.REASON_PENDING), ("cli", sc.REASON_BIND_FAILED)]
 
-    manager.start()  # gagal lagi dengan alasan sama: tidak ada perubahan
-    assert notified == [1]
+    # Percobaan ulang yang berakhir sama: UI sempat melihat "menunggu", jadi harus
+    # diberi tahu bahwa hasilnya kembali gagal (bukan terkunci pada "menunggu").
+    manager.start()
+    assert states[2:] == [("cli", sc.REASON_PENDING), ("cli", sc.REASON_BIND_FAILED)]
 
 
 def test_start_notifies_when_portal_unavailable() -> None:
@@ -457,12 +467,13 @@ def test_disconnect_changed_stops_notifications() -> None:
 
     manager.connect_changed(cb)
     manager.start()
-    assert seen == [1]
+    count = len(seen)
+    assert count >= 1
 
     manager.disconnect_changed(cb)
     manager.disconnect_changed(cb)  # tidak terdaftar lagi: tidak boleh melempar
     portal.closed_cb(sc.REASON_SESSION_CLOSED)
-    assert seen == [1]
+    assert len(seen) == count
 
 
 def test_connect_changed_is_idempotent() -> None:
@@ -475,10 +486,10 @@ def test_connect_changed_is_idempotent() -> None:
     manager.connect_changed(cb)
     manager.connect_changed(cb)
     manager.start()
-    assert seen == [1], "callback terdaftar dua kali tidak boleh dipanggil dua kali"
+    assert seen == [1, 1], "dua kali daftar tidak boleh menggandakan: menunggu + hasil"
 
     portal.closed_cb(sc.REASON_SESSION_CLOSED)
-    assert seen == [1, 1]
+    assert seen == [1, 1, 1]
 
 
 def test_stop_swallows_portal_close_error_and_resets_state() -> None:
@@ -498,4 +509,63 @@ def test_fallback_text_for_closed_reasons_is_specific(reason: str) -> None:
     text = describe_fallback(reason)
     assert "Mulai ulang Pinux" in text
     assert text != describe_fallback(sc.REASON_BIND_FAILED)
+    assert text != describe_fallback(None)
+
+
+# --- Status "menunggu persetujuan" ---------------------------------------------------
+
+
+class SlowPortal(ManagerPortal):
+    """Portal yang melaporkan keadaan manajer tepat saat bind() sedang berjalan."""
+
+    def __init__(self, manager_ref: list, error: Exception | None = None, **kw) -> None:
+        super().__init__(**kw)
+        self.manager_ref = manager_ref
+        self.error = error
+        self.during: list[tuple[str, str | None]] = []
+
+    def bind(self, specs, parent_window: str = ""):
+        manager = self.manager_ref[0]
+        self.during.append((manager.active_backend, manager.last_reason))
+        if self.error is not None:
+            raise self.error
+        return list(self.bound)
+
+
+def _slow(bound=None, error=None) -> tuple[ShortcutManager, SlowPortal]:
+    ref: list = []
+    portal = SlowPortal(ref, error=error, bound=bound)
+    manager = ShortcutManager(portal=portal, specs=SPECS)
+    ref.append(manager)
+    return manager, portal
+
+
+def test_state_is_pending_while_bind_runs_and_cleared_on_success() -> None:
+    manager, portal = _slow(bound=_bound(("translate", "Ctrl+Alt+T")))
+    manager.start()
+    assert portal.during == [("cli", sc.REASON_PENDING)]
+    assert manager.last_reason is None and manager.active_backend == "portal"
+
+
+@pytest.mark.parametrize("error", [None, TimeoutError("lama"), RuntimeError("ditolak")])
+def test_pending_never_sticks_after_bind_fails(error: Exception | None) -> None:
+    manager, portal = _slow(bound=[], error=error)
+    manager.start()
+    assert portal.during == [("cli", sc.REASON_PENDING)]
+    assert manager.last_reason == sc.REASON_BIND_FAILED
+
+
+def test_portal_unavailable_is_not_pending() -> None:
+    portal = ManagerPortal()
+    portal.is_available = lambda: False  # type: ignore[method-assign]
+    manager, _, _ = _manager(portal)
+    states = _record_states(manager)
+    manager.start()
+    assert states == [("cli", sc.REASON_PORTAL_UNAVAILABLE)]
+
+
+def test_pending_text_is_specific() -> None:
+    text = describe_fallback(sc.REASON_PENDING)
+    assert text.startswith("Menunggu")
+    assert "secara manual" in text
     assert text != describe_fallback(None)

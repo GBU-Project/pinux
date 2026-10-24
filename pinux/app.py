@@ -54,7 +54,7 @@ from pinux.tray import TrayItem
 from pinux.ui.popup import PopupWindow
 from pinux.ui.region import RegionOverlay
 from pinux.ui.history import HistoryWindow
-from pinux.ui.settings import SettingsWindow
+from pinux.ui.settings import SHORTCUTS_PAGE_NAME, SettingsWindow
 
 __all__ = ["PinuxApp", "TriggerRouter"]
 
@@ -562,6 +562,7 @@ class PinuxApp(Adw.Application):
         self._add_action("trigger-input", lambda *_: self.trigger_router.request_input_translate())
         self._add_action("trigger-ocr-copy", lambda *_: self.trigger_router.request_ocr_pure())
         self._add_action("settings", lambda *_: self.show_settings_window())
+        self._add_action("settings-shortcuts", lambda *_: self._open_settings_shortcuts())
         self._add_action("history", lambda *_: self.show_history_window())
         self._add_action("quit", lambda *_: self.quit_app())
 
@@ -601,10 +602,11 @@ class PinuxApp(Adw.Application):
             elif manager.last_reason in (REASON_SESSION_CLOSED, REASON_PORTAL_STOPPED):
                 note = Gio.Notification.new("Pintasan global Pinux tidak aktif")
                 note.set_body(
-                    "Sesi pintasan dari desktop berakhir. Pakai 'pinux --trigger' atau buka "
-                    "Pengaturan > Pintasan, lalu mulai ulang Pinux untuk mengikat ulang."
+                    "Sesi pintasan global berakhir (portal desktop berhenti atau dimulai "
+                    "ulang). Pinux beralih ke mode CLI. Ketuk untuk melihat perintah manual "
+                    "di Pengaturan > Pintasan, atau mulai ulang Pinux untuk mengikat ulang."
                 )
-                note.set_default_action("app.settings")
+                note.set_default_action("app.settings-shortcuts")
                 self.send_notification(self._SHORTCUTS_LOST_NOTIFICATION, note)
         except Exception as exc:  # notifikasi bersifat tambahan, tidak boleh mengganggu aplikasi
             logger.debug(f"Notifikasi status pintasan dilewati: {exc}")
@@ -867,8 +869,8 @@ class PinuxApp(Adw.Application):
             win.set_transient_for(self._popup_window)
         win.present()
 
-    def show_settings_window(self) -> None:
-        """Tampilkan SettingsWindow."""
+    def show_settings_window(self, page: str | None = None) -> None:
+        """Tampilkan SettingsWindow; ``page`` (opsional) membuka halaman bernama tersebut."""
         if self._settings_window is None:
             self._settings_window = SettingsWindow(
                 config_store=self.config_store,
@@ -879,7 +881,13 @@ class PinuxApp(Adw.Application):
                 session_type=self.text_capturer.session_type,
                 on_settings_changed=self._on_config_changed,
             )
+        if page is not None:
+            self._settings_window.show_page(page)
         self._settings_window.present()
+
+    def _open_settings_shortcuts(self) -> None:
+        """Buka jendela pengaturan langsung pada halaman Pintasan."""
+        self.show_settings_window(page=SHORTCUTS_PAGE_NAME)
 
     def quit_app(self) -> None:
         """Hentikan aplikasi."""

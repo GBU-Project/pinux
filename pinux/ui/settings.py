@@ -26,7 +26,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk
 
-from pinux.portal.shortcuts import CLI_FLAGS, cli_command, describe_fallback
+from pinux.portal.shortcuts import CLI_FLAGS, REASON_PENDING, cli_command, describe_fallback
+
+#: Nama halaman Pintasan, untuk membukanya langsung (``SettingsWindow.show_page``).
+SHORTCUTS_PAGE_NAME = "shortcuts"
 
 # Judul baris pintasan pada halaman Pintasan (id sesuai ShortcutSpec).
 _SHORTCUT_TITLES = {
@@ -335,11 +338,13 @@ class SettingsWindow(Adw.PreferencesWindow):
     def _build_shortcuts_page(self) -> None:
         page = Adw.PreferencesPage()
         page.set_title("Pintasan")
+        page.set_name(SHORTCUTS_PAGE_NAME)
         page.set_icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
 
         self._shortcuts_group = Adw.PreferencesGroup()
         self._shortcuts_rows: list[Gtk.Widget] = []
         self._shortcuts_destroyed = False
+        self._shortcuts_refresh_scheduled = False
         self._fill_shortcuts_group()
 
         page.add(self._shortcuts_group)
@@ -364,13 +369,25 @@ class SettingsWindow(Adw.PreferencesWindow):
         super().destroy()
 
     def _on_shortcuts_changed(self) -> None:
-        # Dijadwalkan lewat main loop agar aman dipanggil dari thread mana pun.
+        # Dijadwalkan lewat main loop agar aman dipanggil dari thread mana pun, dan
+        # dikumpulkan: pemberitahuan beruntun hanya menyusun ulang halaman sekali.
+        if self._shortcuts_refresh_scheduled:
+            return
+        self._shortcuts_refresh_scheduled = True
         GLib.idle_add(self._refresh_shortcuts_page)
 
     def _refresh_shortcuts_page(self) -> bool:
+        self._shortcuts_refresh_scheduled = False
         if not self._shortcuts_destroyed:
             self._fill_shortcuts_group()
         return GLib.SOURCE_REMOVE
+
+    def show_page(self, name: str) -> None:
+        """Buka halaman berdasarkan namanya (mis. ``SHORTCUTS_PAGE_NAME``)."""
+        try:
+            self.set_visible_page_name(name)
+        except Exception as exc:
+            logger.debug(f"Halaman '{name}' tidak dapat dibuka: {exc}")
 
     def _add_shortcut_row(self, row: Gtk.Widget) -> None:
         self._shortcuts_group.add(row)
@@ -415,8 +432,12 @@ class SettingsWindow(Adw.PreferencesWindow):
                 missing_row.set_subtitle_selectable(True)
                 self._add_shortcut_row(missing_row)
         else:
-            group.set_title("Pintasan Keyboard Manual (CLI Mode)")
-            group.set_description(describe_fallback(self._shortcut_manager.last_reason))
+            reason = self._shortcut_manager.last_reason
+            group.set_title(
+                "Menunggu Persetujuan Desktop…" if reason == REASON_PENDING
+                else "Pintasan Keyboard Manual (CLI Mode)"
+            )
+            group.set_description(describe_fallback(reason))
 
             for sid in ("translate", "ocr"):
                 row = Adw.ActionRow()

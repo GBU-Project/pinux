@@ -465,6 +465,8 @@ REASON_PORTAL_UNAVAILABLE: Final[str] = "portal_unavailable"
 REASON_BIND_FAILED: Final[str] = "bind_failed"
 REASON_SESSION_CLOSED: Final[str] = "session_closed"
 REASON_PORTAL_STOPPED: Final[str] = "portal_stopped"
+# Bukan kegagalan: pengikatan sedang berjalan dan menunggu persetujuan desktop.
+REASON_PENDING: Final[str] = "pending"
 
 # Opsi CLI yang setara dengan tiap id pintasan (R1.3).
 CLI_FLAGS: Final[dict[str, str]] = {
@@ -480,6 +482,10 @@ _FALLBACK_DESCRIPTIONS: Final[dict[str, str]] = {
     REASON_BIND_FAILED: (
         "Pintasan global tidak aktif: permintaan ke portal ditolak, dibatalkan, "
         "atau tidak dijawab. " + _FALLBACK_INTRO
+    ),
+    REASON_PENDING: (
+        "Menunggu desktop menyetujui pintasan global; dialog persetujuan mungkin sedang "
+        "tampil. Sementara itu, " + _FALLBACK_INTRO[0].lower() + _FALLBACK_INTRO[1:]
     ),
     REASON_SESSION_CLOSED: (
         "Sesi pintasan global ditutup oleh desktop. Mulai ulang Pinux untuk mengikat "
@@ -543,6 +549,9 @@ class ShortcutManager:
         self._bound_shortcuts: list[BoundShortcut] = []
         self._last_reason: str | None = None
         self._changed_callbacks: list[Callable[[], None]] = []
+        # Keadaan yang terakhir dilihat pendengar; None setelah stop() atau sebelum
+        # pemberitahuan pertama, sehingga start() berikutnya selalu memberi tahu.
+        self._ui_snapshot: tuple | None = None
 
     @property
     def active_backend(self) -> ShortcutBackend:
@@ -577,6 +586,7 @@ class ShortcutManager:
         )
 
     def _notify_changed(self) -> None:
+        self._ui_snapshot = self._snapshot()
         for cb in list(self._changed_callbacks):
             try:
                 cb()
@@ -651,12 +661,15 @@ class ShortcutManager:
         Idempoten saat backend portal sudah aktif: pemanggilan ulang tidak membuka
         sesi baru maupun mendaftarkan callback ganda. Pada jalur gagal sesi portal
         ditutup; memanggil ``start()`` lagi dari mode CLI akan mencoba ulang.
-        Callback ``connect_changed`` dipanggil bila keadaan akhirnya berbeda dari
-        sebelum pemanggilan.
+        Callback ``connect_changed`` dipanggil bila keadaan berubah. Selama pengikatan
+        berjalan ``last_reason`` bernilai ``REASON_PENDING`` dan pendengar diberi tahu
+        lebih dulu, sehingga UI dapat menampilkan "menunggu persetujuan" saat dialog
+        desktop terbuka (loop bersarang tetap memproses UI).
         """
-        before = self._snapshot()
         backend = self._start()
-        if self._snapshot() != before:
+        # Bandingkan dengan yang terakhir diberitahukan (bukan keadaan sebelum start),
+        # agar kembali dari "menunggu" ke hasil yang sama dengan sebelumnya tetap diberi tahu.
+        if self._snapshot() != self._ui_snapshot:
             self._notify_changed()
         return backend
 
@@ -675,6 +688,8 @@ class ShortcutManager:
         self._portal.connect_closed(self._on_portal_closed)
         self._portal.connect_shortcuts_changed(self._on_portal_shortcuts_changed)
 
+        self._last_reason = REASON_PENDING
+        self._notify_changed()
         try:
             bound = self._portal.bind(self._specs)
             if bound:
@@ -709,3 +724,4 @@ class ShortcutManager:
         self._bound_shortcuts = []
         self._active_backend = "cli"
         self._last_reason = None
+        self._ui_snapshot = None  # start() berikutnya selalu memberi tahu pendengar

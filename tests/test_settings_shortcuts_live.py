@@ -234,3 +234,87 @@ def test_weak_listener_does_not_keep_window_alive_and_unregisters_itself() -> No
     gc.collect()
     listener()  # target sudah hilang: melepas dirinya dari manajer
     manager.disconnect_changed.assert_called_once_with(listener)
+
+
+# --- Patch 0007: refresh terkumpul, halaman bernama, status menunggu -------------------
+
+
+def test_burst_of_changes_rebuilds_the_page_only_once(setup) -> None:
+    win, manager, _portal = setup
+    manager.start()
+    _pump()
+
+    fills: list[int] = []
+    original = win._fill_shortcuts_group
+    win._fill_shortcuts_group = lambda: (fills.append(1), original())[1]
+
+    for _ in range(10):
+        win._on_shortcuts_changed()
+    _pump()
+
+    assert fills == [1], "sepuluh pemberitahuan beruntun hanya boleh menyusun ulang sekali"
+
+    win._on_shortcuts_changed()  # penjadwalan berikutnya tetap bekerja
+    _pump()
+    assert fills == [1, 1]
+
+
+def test_show_page_opens_the_shortcuts_page(setup) -> None:
+    win, _manager, _portal = setup
+    assert win.get_visible_page_name() != "shortcuts"
+
+    win.show_page("shortcuts")
+
+    assert win.get_visible_page_name() == "shortcuts"
+
+
+def test_show_page_ignores_unknown_page(setup) -> None:
+    win, _manager, _portal = setup
+    win.show_page("tidak-ada")  # tidak boleh melempar
+
+
+class PumpingPortal(FakePortal):
+    """Portal yang memutar main loop di dalam bind(), seperti menunggu dialog desktop."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.win: SettingsWindow | None = None
+        self.seen: tuple[str, str] | None = None
+
+    def bind(self, specs, parent_window: str = ""):
+        _pump(300)  # UI tetap diproses selama menunggu
+        group = self.win._shortcuts_group  # judul status menunggu tak berawalan "Pintasan Keyboard"
+        self.seen = (group.get_title() or "", group.get_description() or "")
+        return super().bind(specs, parent_window)
+
+
+def test_page_shows_waiting_state_while_bind_is_blocked(tmp_path: Path) -> None:
+    portal = PumpingPortal(_bound(("translate", "Ctrl+Alt+T"), ("ocr", "Ctrl+Alt+O")))
+    manager = ShortcutManager(portal=portal, specs=SPECS)
+    win = _make_window(tmp_path, manager)
+    portal.win = win
+    try:
+        manager.start()
+        _pump()
+
+        title, description = portal.seen
+        assert title == "Menunggu Persetujuan Desktop…"
+        assert description.startswith("Menunggu")
+        assert _group(win).get_title() == PORTAL_TITLE, "setelah bind selesai halaman menampilkan portal"
+    finally:
+        win.destroy()
+
+
+def test_page_returns_from_waiting_to_cli_when_bind_is_rejected(tmp_path: Path) -> None:
+    portal = PumpingPortal(bound=[])
+    manager = ShortcutManager(portal=portal, specs=SPECS)
+    win = _make_window(tmp_path, manager)
+    portal.win = win
+    try:
+        manager.start()
+        _pump()
+        assert portal.seen[0] == "Menunggu Persetujuan Desktop…"
+        assert _group(win).get_title() == CLI_TITLE
+        assert "ditolak" in (_group(win).get_description() or "")
+    finally:
+        win.destroy()
