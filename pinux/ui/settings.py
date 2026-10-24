@@ -446,6 +446,27 @@ class SettingsWindow(Adw.PreferencesWindow):
                 row.set_subtitle_selectable(True)
                 self._add_shortcut_row(row)
 
+            if reason != REASON_PENDING:
+                retry_row = Adw.ActionRow()
+                retry_row.set_title("Coba Ikat Ulang Pintasan Global")
+                retry_row.set_subtitle("Minta desktop menyetujui pintasan global lagi tanpa memulai ulang Pinux")
+                retry_btn = Gtk.Button(label="Coba Lagi")
+                retry_btn.set_valign(Gtk.Align.CENTER)
+                retry_btn.connect("clicked", self._on_retry_shortcuts_clicked)
+                retry_row.add_suffix(retry_btn)
+                self._add_shortcut_row(retry_row)
+
+    def _on_retry_shortcuts_clicked(self, button: Gtk.Button) -> None:
+        """Ikat ulang pintasan portal tanpa memblokir UI (dialog desktop berjalan di worker)."""
+        button.set_sensitive(False)  # cegah klik ganda; halaman disusun ulang saat keadaan berubah
+        try:
+            started = self._shortcut_manager.start_async(lambda _backend: self._on_shortcuts_changed())
+        except Exception as exc:
+            logger.warning(f"Gagal mengikat ulang pintasan: {exc}")
+            started = False
+        if not started:
+            button.set_sensitive(True)
+
     # -- Halaman OCR ----------------------------------------------------------
 
     def _build_ocr_page(self) -> None:

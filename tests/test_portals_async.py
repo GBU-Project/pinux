@@ -235,3 +235,17 @@ def test_on_done_exception_is_contained() -> None:
     assert _pump_until(lambda: manager.active_backend == "portal")
     _pump(100)
     assert manager.start_async() is True  # manajer tidak macet setelah callback gagal
+
+
+def test_start_async_from_worker_thread_warns(caplog) -> None:
+    import logging
+
+    portal = GatedPortal(available=False)
+    manager, _states = _manager(portal)
+
+    with caplog.at_level(logging.WARNING, logger="pinux.portal.shortcuts"):
+        t = threading.Thread(target=manager.start_async)
+        t.start()
+        t.join(2)
+
+    assert any("bukan thread utama" in r.getMessage() for r in caplog.records)

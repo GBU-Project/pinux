@@ -318,3 +318,109 @@ def test_page_returns_from_waiting_to_cli_when_bind_is_rejected(tmp_path: Path) 
         assert "ditolak" in (_group(win).get_description() or "")
     finally:
         win.destroy()
+
+
+# --- Patch 0009: tombol "Coba Ikat Ulang" -----------------------------------------------
+
+
+def _retry_buttons(win: SettingsWindow) -> list[Gtk.Button]:
+    return [
+        w for w in _walk(win._shortcuts_group)  # judul status menunggu tak berawalan "Pintasan Keyboard"
+        if isinstance(w, Gtk.Button) and w.get_label() == "Coba Lagi"
+    ]
+
+
+def _wait(cond, timeout_s: float = 3.0) -> bool:
+    ctx = GLib.MainContext.default()
+    end = GLib.get_monotonic_time() + int(timeout_s * 1_000_000)
+    while GLib.get_monotonic_time() < end:
+        while ctx.pending():
+            ctx.iteration(False)
+        if cond():
+            return True
+        GLib.usleep(2000)
+    return cond()
+
+
+def test_retry_button_shown_in_cli_mode_only(setup) -> None:
+    win, manager, _portal = setup
+    assert len(_retry_buttons(win)) == 1  # belum dimulai: mode CLI
+
+    manager.start()
+    _pump()
+    assert _retry_buttons(win) == [], "pada mode portal tombol tidak ada"
+
+
+def test_retry_button_hidden_while_pending(tmp_path: Path) -> None:
+    portal = FakePortal(_bound(("translate", "Ctrl+Alt+T"), ("ocr", "Ctrl+Alt+O")))
+    manager = ShortcutManager(portal=portal, specs=SPECS)
+    win = _make_window(tmp_path, manager)
+    seen: list[int] = []
+
+    def bind(specs, parent_window: str = ""):
+        _pump(200)  # UI memproses pemberitahuan "menunggu"
+        seen.append(len(_retry_buttons(win)))
+        return _bound(("translate", "Ctrl+Alt+T"), ("ocr", "Ctrl+Alt+O"))
+
+    portal.bind = bind
+    try:
+        manager.start()
+        assert seen == [0], "selama menunggu persetujuan tombol tidak boleh tampil"
+    finally:
+        win.destroy()
+
+
+def test_retry_after_rejection_binds_without_blocking(tmp_path: Path) -> None:
+    portal = FakePortal(bound=[])  # pertama ditolak
+    manager = ShortcutManager(portal=portal, specs=SPECS)
+    win = _make_window(tmp_path, manager)
+    try:
+        manager.start()
+        _pump()
+        assert _group(win).get_title() == CLI_TITLE
+        buttons = _retry_buttons(win)
+        assert len(buttons) == 1
+
+        portal.bound = _bound(("translate", "Ctrl+Alt+T"), ("ocr", "Ctrl+Alt+O"))  # kini disetujui
+        buttons[0].emit("clicked")
+
+        assert _wait(lambda: _group(win).get_title() == PORTAL_TITLE)
+        assert manager.active_backend == "portal"
+        assert _retry_buttons(win) == []
+    finally:
+        win.destroy()
+
+
+def test_retry_after_session_loss_rebinds(setup) -> None:
+    win, manager, portal = setup
+    manager.start()
+    _pump()
+    portal.closed_cb(sc.REASON_PORTAL_STOPPED)
+    _pump()
+    buttons = _retry_buttons(win)
+    assert len(buttons) == 1
+
+    buttons[0].emit("clicked")
+
+    assert _wait(lambda: _group(win).get_title() == PORTAL_TITLE)
+
+
+def test_retry_button_reenabled_when_start_is_refused(setup) -> None:
+    win, manager, _portal = setup
+    button = _retry_buttons(win)[0]
+    manager.start_async = MagicMock(return_value=False)  # mis. pengikatan lain sedang berjalan
+
+    button.emit("clicked")
+
+    assert button.get_sensitive() is True
+    manager.start_async.assert_called_once()
+
+
+def test_retry_button_reenabled_when_start_raises(setup) -> None:
+    win, manager, _portal = setup
+    button = _retry_buttons(win)[0]
+    manager.start_async = MagicMock(side_effect=RuntimeError("rusak"))
+
+    button.emit("clicked")  # tidak boleh melempar
+
+    assert button.get_sensitive() is True

@@ -699,6 +699,8 @@ class ShortcutManager:
         pengikatan yang sedang berjalan: hasilnya dibuang dan sesi yang mungkin sempat
         dibuka ditutup.
         """
+        if threading.current_thread() is not threading.main_thread():
+            logger.warning("start_async() dipanggil dari bukan thread utama; ini tidak didukung.")
         if self._async_token is not None:
             return False
         backend = self._begin()
@@ -766,7 +768,13 @@ class ShortcutManager:
         return None
 
     def _bind_blocking(self) -> tuple[list[BoundShortcut] | None, Exception | None]:
-        """Ikat pintasan (memblokir); aman dijalankan pada worker thread, tidak mengubah keadaan."""
+        """Ikat pintasan (memblokir); aman dijalankan pada worker thread, tidak mengubah keadaan.
+
+        Catatan thread: ``stop()`` dan sinyal ``Closed`` (thread utama) boleh datang saat
+        ``bind()`` berjalan di sini. Itu disengaja: ``close()`` mengosongkan sesi sehingga
+        ``bind()`` gagal atau habis waktu, lalu hasilnya jatuh ke mode CLI atau dibuang
+        (``_async_token``), tanpa mengubah keadaan manajer dari thread ini.
+        """
         try:
             return self._portal.bind(self._specs), None
         except Exception as exc:
