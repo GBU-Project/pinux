@@ -550,14 +550,31 @@ class ShortcutManager:
         return self._active_backend
 
     def connect_changed(self, callback: Callable[[], None]) -> None:
-        """Daftarkan callback saat backend atau pemicu berubah setelah ``start()``.
+        """Daftarkan callback saat backend, alasan fallback, atau pemicu berubah.
 
-        Dipanggil bila sesi portal berakhir (backend turun ke 'cli') atau pengguna
-        mengubah pemicu di pengaturan sistem. Tidak dipanggil oleh ``start()`` dan
-        ``stop()`` sendiri. Idempoten.
+        Dipanggil bila ``start()`` menghasilkan keadaan berbeda (misalnya pengikatan
+        portal selesai setelah UI tampil), sesi portal berakhir (backend turun ke
+        'cli'), atau pengguna mengubah pemicu di pengaturan sistem. Tidak dipanggil
+        oleh ``stop()``, dan tidak bila ``start()`` tidak mengubah apa pun. Idempoten.
+        Callback dapat dipanggil dari callback D-Bus pada main loop.
         """
         if callback not in self._changed_callbacks:
             self._changed_callbacks.append(callback)
+
+    def disconnect_changed(self, callback: Callable[[], None]) -> None:
+        """Lepas callback perubahan; aman bila callback tidak terdaftar."""
+        try:
+            self._changed_callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    def _snapshot(self) -> tuple:
+        """Ringkasan keadaan yang tampil di UI, untuk mendeteksi perubahan."""
+        return (
+            self._active_backend,
+            self._last_reason,
+            tuple((b.id, b.trigger) for b in self._bound_shortcuts),
+        )
 
     def _notify_changed(self) -> None:
         for cb in list(self._changed_callbacks):
@@ -634,7 +651,16 @@ class ShortcutManager:
         Idempoten saat backend portal sudah aktif: pemanggilan ulang tidak membuka
         sesi baru maupun mendaftarkan callback ganda. Pada jalur gagal sesi portal
         ditutup; memanggil ``start()`` lagi dari mode CLI akan mencoba ulang.
+        Callback ``connect_changed`` dipanggil bila keadaan akhirnya berbeda dari
+        sebelum pemanggilan.
         """
+        before = self._snapshot()
+        backend = self._start()
+        if self._snapshot() != before:
+            self._notify_changed()
+        return backend
+
+    def _start(self) -> ShortcutBackend:
         if self._active_backend == "portal" and self._bound_shortcuts:
             return "portal"
 

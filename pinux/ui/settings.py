@@ -17,6 +17,7 @@ Perujuk: R3.4, R3.7, R6.5, R7.4, R9.3, R9.4, R9.5, R11.6.
 from __future__ import annotations
 
 import logging
+import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +45,23 @@ if TYPE_CHECKING:
 __all__ = ["SettingsWindow"]
 
 logger = logging.getLogger("pinux.ui.settings")
+
+
+def _weak_listener(window: "SettingsWindow", manager: "ShortcutManager") -> Callable[[], None]:
+    """Callback ``connect_changed`` yang tidak menahan ``window`` di memori.
+
+    Bila jendela sudah tidak ada, callback melepas dirinya dari ``manager``.
+    """
+    ref = weakref.ref(window)
+
+    def listener() -> None:
+        target = ref()
+        if target is None:
+            manager.disconnect_changed(listener)
+        else:
+            target._on_shortcuts_changed()
+
+    return listener
 
 
 class SettingsWindow(Adw.PreferencesWindow):
@@ -319,7 +337,52 @@ class SettingsWindow(Adw.PreferencesWindow):
         page.set_title("Pintasan")
         page.set_icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
 
-        group = Adw.PreferencesGroup()
+        self._shortcuts_group = Adw.PreferencesGroup()
+        self._shortcuts_rows: list[Gtk.Widget] = []
+        self._shortcuts_destroyed = False
+        self._fill_shortcuts_group()
+
+        page.add(self._shortcuts_group)
+        self.add(page)
+
+        # Pengikatan portal berjalan setelah startup dan dapat berakhir kapan saja
+        # (restart portal, perubahan pemicu), jadi halaman memperbarui diri. Callback
+        # memegang referensi lemah agar manajer tidak menahan jendela di memori.
+        self._shortcut_listener = _weak_listener(self, self._shortcut_manager)
+        self._shortcut_manager.connect_changed(self._shortcut_listener)
+
+    def destroy(self) -> None:
+        """Hancurkan jendela dan lepas pendengar ShortcutManager.
+
+        Di GTK4 sinyal ``destroy`` tidak dipancarkan selama masih ada referensi Python,
+        sehingga pelepasan dilakukan di sini.
+        """
+        self._shortcuts_destroyed = True
+        listener = getattr(self, "_shortcut_listener", None)
+        if listener is not None:
+            self._shortcut_manager.disconnect_changed(listener)
+        super().destroy()
+
+    def _on_shortcuts_changed(self) -> None:
+        # Dijadwalkan lewat main loop agar aman dipanggil dari thread mana pun.
+        GLib.idle_add(self._refresh_shortcuts_page)
+
+    def _refresh_shortcuts_page(self) -> bool:
+        if not self._shortcuts_destroyed:
+            self._fill_shortcuts_group()
+        return GLib.SOURCE_REMOVE
+
+    def _add_shortcut_row(self, row: Gtk.Widget) -> None:
+        self._shortcuts_group.add(row)
+        self._shortcuts_rows.append(row)
+
+    def _fill_shortcuts_group(self) -> None:
+        """Isi ulang grup Pintasan sesuai keadaan ShortcutManager saat ini."""
+        group = self._shortcuts_group
+        for row in self._shortcuts_rows:
+            group.remove(row)
+        self._shortcuts_rows.clear()
+
         backend = self._shortcut_manager.active_backend
 
         if backend == "portal":
@@ -331,7 +394,7 @@ class SettingsWindow(Adw.PreferencesWindow):
                 row.set_title(s.id.capitalize())
                 escaped_trigger = GLib.markup_escape_text(s.trigger)
                 row.set_subtitle(f"Pemicu: {escaped_trigger}")
-                group.add(row)
+                self._add_shortcut_row(row)
 
             btn_row = Adw.ActionRow()
             btn_row.set_title("Ubah Kombinasi Tombol Pintasan")
@@ -339,7 +402,7 @@ class SettingsWindow(Adw.PreferencesWindow):
             cfg_btn = Gtk.Button(label="Ubah di Sistem")
             cfg_btn.connect("clicked", lambda _: self._shortcut_manager.configure_shortcuts())
             btn_row.add_suffix(cfg_btn)
-            group.add(btn_row)
+            self._add_shortcut_row(btn_row)
 
             # Pintasan yang tidak disetujui portal tetap perlu jalur CLI (R1.3)
             for sid in tuple(self._shortcut_manager.missing_shortcuts):
@@ -350,7 +413,7 @@ class SettingsWindow(Adw.PreferencesWindow):
                 missing_row.set_title(f"{_SHORTCUT_TITLES.get(sid, sid.capitalize())} (tidak disetujui)")
                 missing_row.set_subtitle(GLib.markup_escape_text(cli_command(flag)))
                 missing_row.set_subtitle_selectable(True)
-                group.add(missing_row)
+                self._add_shortcut_row(missing_row)
         else:
             group.set_title("Pintasan Keyboard Manual (CLI Mode)")
             group.set_description(describe_fallback(self._shortcut_manager.last_reason))
@@ -360,10 +423,7 @@ class SettingsWindow(Adw.PreferencesWindow):
                 row.set_title(_SHORTCUT_TITLES[sid])
                 row.set_subtitle(GLib.markup_escape_text(cli_command(CLI_FLAGS[sid])))
                 row.set_subtitle_selectable(True)
-                group.add(row)
-
-        page.add(group)
-        self.add(page)
+                self._add_shortcut_row(row)
 
     # -- Halaman OCR ----------------------------------------------------------
 

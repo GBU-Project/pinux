@@ -339,6 +339,7 @@ def _manager(portal: ManagerPortal | None = None) -> tuple[ShortcutManager, Mana
 def test_manager_falls_back_to_cli_when_session_closes() -> None:
     manager, portal, notified = _manager()
     assert manager.start() == "portal"
+    notified.clear()  # abaikan pemberitahuan dari start() itu sendiri
 
     portal.closed_cb(sc.REASON_SESSION_CLOSED)
 
@@ -360,6 +361,7 @@ def test_closed_in_cli_mode_is_ignored() -> None:
     portal = ManagerPortal(bound=[])  # bind kosong -> CLI
     manager, _, notified = _manager(portal)
     manager.start()
+    notified.clear()  # abaikan pemberitahuan dari start() itu sendiri
     reason = manager.last_reason
 
     portal.closed_cb(sc.REASON_SESSION_CLOSED)
@@ -380,6 +382,7 @@ def test_manager_can_rebind_after_session_closed() -> None:
 def test_shortcuts_changed_updates_trigger_and_notifies() -> None:
     manager, portal, notified = _manager()
     manager.start()
+    notified.clear()  # abaikan pemberitahuan dari start() itu sendiri
 
     portal.changed_cb(_bound(("translate", "Ctrl+Shift+T")))
 
@@ -392,6 +395,7 @@ def test_shortcuts_changed_updates_trigger_and_notifies() -> None:
 def test_shortcuts_changed_ignores_unknown_same_and_empty() -> None:
     manager, portal, notified = _manager()
     manager.start()
+    notified.clear()  # abaikan pemberitahuan dari start() itu sendiri
 
     portal.changed_cb(_bound(("tidak-dikenal", "Ctrl+Z")))
     portal.changed_cb(_bound(("translate", "Ctrl+Alt+T")))  # sama
@@ -401,16 +405,64 @@ def test_shortcuts_changed_ignores_unknown_same_and_empty() -> None:
     assert {b.id: b.trigger for b in manager.bound_shortcuts}["translate"] == "Ctrl+Alt+T"
 
 
-def test_changed_not_fired_by_start_or_stop_and_errors_are_contained() -> None:
+def test_changed_fired_by_start_only_when_state_changes_and_errors_are_contained() -> None:
     manager, portal, notified = _manager()
     manager.connect_changed(lambda: (_ for _ in ()).throw(RuntimeError("rusak")))
-    manager.start()
-    manager.stop()
-    assert notified == []
+
+    manager.start()  # cli -> portal: berubah (callback rusak tidak boleh menghentikan yang lain)
+    assert notified == [1]
+
+    manager.start()  # idempoten: tidak ada perubahan
+    assert notified == [1]
+
+    manager.stop()  # shutdown tidak memberi tahu UI
+    assert notified == [1]
+
+    manager.start()  # setelah stop, kembali ke portal: berubah lagi
+    assert notified == [1, 1]
+
+    portal.closed_cb(sc.REASON_SESSION_CLOSED)
+    assert notified == [1, 1, 1]
+
+
+def test_start_notifies_when_bind_fails_and_not_on_identical_retry() -> None:
+    portal = ManagerPortal(bound=[])  # bind kosong -> CLI dengan alasan bind_failed
+    manager, _, notified = _manager(portal)
 
     manager.start()
-    portal.closed_cb(sc.REASON_SESSION_CLOSED)  # callback rusak tidak boleh menghentikan yang lain
+    assert manager.last_reason == sc.REASON_BIND_FAILED
+    assert notified == [1], "UI yang dibuka sebelum start() selesai harus diberi tahu"
+
+    manager.start()  # gagal lagi dengan alasan sama: tidak ada perubahan
     assert notified == [1]
+
+
+def test_start_notifies_when_portal_unavailable() -> None:
+    portal = ManagerPortal()
+    portal.is_available = lambda: False  # type: ignore[method-assign]
+    manager, _, notified = _manager(portal)
+
+    manager.start()
+
+    assert manager.last_reason == sc.REASON_PORTAL_UNAVAILABLE
+    assert notified == [1]
+
+
+def test_disconnect_changed_stops_notifications() -> None:
+    manager, portal, _ = _manager()
+    seen: list[int] = []
+
+    def cb() -> None:
+        seen.append(1)
+
+    manager.connect_changed(cb)
+    manager.start()
+    assert seen == [1]
+
+    manager.disconnect_changed(cb)
+    manager.disconnect_changed(cb)  # tidak terdaftar lagi: tidak boleh melempar
+    portal.closed_cb(sc.REASON_SESSION_CLOSED)
+    assert seen == [1]
 
 
 def test_connect_changed_is_idempotent() -> None:
@@ -423,8 +475,10 @@ def test_connect_changed_is_idempotent() -> None:
     manager.connect_changed(cb)
     manager.connect_changed(cb)
     manager.start()
+    assert seen == [1], "callback terdaftar dua kali tidak boleh dipanggil dua kali"
+
     portal.closed_cb(sc.REASON_SESSION_CLOSED)
-    assert seen == [1]
+    assert seen == [1, 1]
 
 
 def test_stop_swallows_portal_close_error_and_resets_state() -> None:

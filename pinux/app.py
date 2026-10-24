@@ -38,7 +38,13 @@ from pinux.ocr.imagefile import ImageFileError, load_image_as_png
 from pinux.ocr.pipeline import recognize_text_or_qr
 from pinux.ocr.client import OcrWorkerClient
 from pinux.portal.screenshot import ScreenshotPortal
-from pinux.portal.shortcuts import ShortcutManager, ShortcutSpec, specs_from_settings
+from pinux.portal.shortcuts import (
+    REASON_PORTAL_STOPPED,
+    REASON_SESSION_CLOSED,
+    ShortcutManager,
+    ShortcutSpec,
+    specs_from_settings,
+)
 from pinux.scheduler import RequestScheduler
 from pinux.translate.base import TranslationRequest
 from pinux.history import HistoryStore
@@ -450,6 +456,7 @@ class PinuxApp(Adw.Application):
             specs=specs_from_settings(self.settings.shortcuts) or None,
             on_activated=self.trigger_router.on_shortcut_activated,
         )
+        self.shortcut_manager.connect_changed(self._on_shortcut_state_changed)
 
         self.tray_item = tray_item or TrayItem(
             on_translate_selection=self.trigger_router.request_translate,
@@ -576,6 +583,31 @@ class PinuxApp(Adw.Application):
         # Menjaga proses background/daemon tetap hidup walau tanpa jendela menetap
         self.hold()
 
+
+    #: ID notifikasi desktop saat pintasan global hilang mendadak.
+    _SHORTCUTS_LOST_NOTIFICATION = "pinux-shortcuts-lost"
+
+    def _on_shortcut_state_changed(self) -> None:
+        """Beri tahu pengguna bila pintasan global hilang mendadak.
+
+        Hanya untuk kehilangan yang tidak diminta (sesi ditutup desktop atau portal
+        berhenti), karena itu gagal senyap bila jendela pengaturan sedang tertutup.
+        Notifikasi ditarik kembali saat pintasan portal aktif lagi.
+        """
+        manager = self.shortcut_manager
+        try:
+            if manager.active_backend == "portal":
+                self.withdraw_notification(self._SHORTCUTS_LOST_NOTIFICATION)
+            elif manager.last_reason in (REASON_SESSION_CLOSED, REASON_PORTAL_STOPPED):
+                note = Gio.Notification.new("Pintasan global Pinux tidak aktif")
+                note.set_body(
+                    "Sesi pintasan dari desktop berakhir. Pakai 'pinux --trigger' atau buka "
+                    "Pengaturan > Pintasan, lalu mulai ulang Pinux untuk mengikat ulang."
+                )
+                note.set_default_action("app.settings")
+                self.send_notification(self._SHORTCUTS_LOST_NOTIFICATION, note)
+        except Exception as exc:  # notifikasi bersifat tambahan, tidak boleh mengganggu aplikasi
+            logger.debug(f"Notifikasi status pintasan dilewati: {exc}")
 
     def _start_shortcuts(self) -> bool:
         try:
