@@ -117,7 +117,8 @@ class TtsEngine:
             if proc.poll() is None:
                 try:
                     proc.terminate()
-                except OSError:
+                    proc.wait(timeout=0.2)
+                except (OSError, subprocess.TimeoutExpired):
                     pass
 
             # Bersihkan dan tunggu proses di thread latar agar UI tidak freeze
