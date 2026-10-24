@@ -134,3 +134,11 @@ def test_history_settings_roundtrip_and_validation(tmp_path):
     loaded = bad.load()
     assert loaded.history.enabled is True and loaded.history.max_entries == 500
     assert len(bad.warnings) >= 2
+
+
+def test_close_is_idempotent():
+    s = HistoryStore(":memory:")
+    s.close()
+    # Pemanggilan close() kedua tidak boleh melempar exception
+    s.close()
+    assert s._closed is True

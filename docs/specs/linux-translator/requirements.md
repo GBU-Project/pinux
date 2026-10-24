@@ -171,12 +171,39 @@ Rilis v1 mencakup: terjemahan teks dengan popup, OCR terjemahan dari tangkapan l
 5. Pinux SHALL berjalan tanpa paket sistem tambahan di luar paket yang menyediakan GTK4, libadwaita, dan PyGObject.
 6. WHILE Desktop_Session bernilai Wayland, Pinux SHALL menampilkan keterangan pada layar pengaturan bahwa penangkapan teks bersumber dari Clipboard.
 
+### Requirement 12: Riwayat Terjemahan dan Favorit
+
+**User Story:** AS pengguna, I want melihat riwayat terjemahan dan menyimpan favorit, so that saya dapat meninjau kembali terjemahan penting sebelumnya.
+
+#### Acceptance Criteria
+
+1. Pinux SHALL menyimpan riwayat masukan dan hasil terjemahan secara lokal dalam database SQLite yang aman.
+2. WHEN pengguna membuka jendela riwayat (`pinux --history` atau tombol riwayat pada popup), Pinux SHALL menampilkan daftar riwayat dengan pencarian dan filter favorit.
+3. WHEN pengguna menandai entri sebagai favorit, Pinux SHALL mempertahankan status favorit entri tersebut.
+4. IF pengguna menonaktifkan fitur riwayat melalui konfigurasi `[history] enabled = false`, Pinux SHALL tidak mencatat terjemahan baru ke dalam database.
+
+### Requirement 13: Text-to-Speech (TTS)
+
+**User Story:** AS pengguna, I want mendengarkan pelafalan teks sumber dan terjemahan, so that saya mengetahui cara membaca dan melafalkan teks tersebut.
+
+#### Acceptance Criteria
+
+1. WHEN pengguna menekan tombol TTS pada Popup_Window, Pinux SHALL melafalkan teks yang bersangkutan menggunakan backend TTS lokal (`spd-say`, `espeak-ng`, `espeak`, atau `say`).
+2. Pinux SHALL mengirim teks ke backend TTS secara non-blokir melalui `stdin` guna mencegah command injection dan masalah karakter khusus.
+3. WHEN pengguna memicu penghentian atau memulai pelafalan baru, Pinux SHALL menghentikan proses pelafalan sebelumnya secara asinkron tanpa memblokir thread antarmuka.
+
+### Requirement 14: Distribusi Paket Flatpak
+
+**User Story:** AS pengguna Linux berbagai distribusi, I want memasang Pinux dengan mudah melalui Flatpak, so that aplikasi terisolasi dan berjalan secara konsisten di Wayland maupun X11.
+
+#### Acceptance Criteria
+
+1. Pinux SHALL menyediakan berkas manifest Flatpak `io.github.gbu_project.Pinux.yml` yang terintegrasi dengan GNOME Platform Runtime dan XDG Desktop Portal.
+2. Pinux Flatpak SHALL mendukung integrasi audio (PulseAudio / Speech Dispatcher), Secret Service, dan tray icon (StatusNotifierItem).
+
 ## Non-Goals untuk v1
 
-- Riwayat terjemahan dan buku kosakata.
-- Text-to-speech.
-- Mode kamus dengan fonetik dan contoh kalimat.
-- Penerjemahan luring berbasis model neural.
-- Implementasi Keyed_Provider.
-- Paket distribusi Flatpak, Snap, dan AppImage.
-- Dukungan macOS dan Windows.
+- Mode kamus multi-bahasa luring dengan unduhan korpus kamus komprehensif berukuran gigabyte.
+- Penerjemahan luring teks umum berbasis model neural besar (LLM lokal seperti Ollama tetap didukung melalui protokol API HTTP).
+- Dukungan sistem operasi non-Linux (macOS dan Windows).
+

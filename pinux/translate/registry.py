@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
@@ -27,7 +28,14 @@ else:
 
 from pinux.config import ProviderEntry
 from pinux.credentials import CredentialStore
-from pinux.translate.base import TranslationProvider
+from pinux.translate.base import (
+    CancelToken,
+    Language,
+    TranslationError,
+    TranslationProvider,
+    TranslationRequest,
+    TranslationResult,
+)
 from pinux.translate.chain import FallbackChain
 from pinux.translate.compare import CompareProvider
 from pinux.translate.deepl import DeepLProvider
@@ -44,6 +52,33 @@ __all__ = [
 
 ENTRY_POINT_GROUP: Final[str] = "pinux.providers"
 logger = logging.getLogger("pinux.translate.registry")
+
+
+class _ProviderAlias:
+    """Alias provider dengan ID yang di-override dari konfigurasi.
+
+    Memungkinkan pengguna mendaftarkan instance kedua provider yang sama
+    (mis. dua endpoint DeepL) dengan ID berbeda.
+    """
+
+    def __init__(self, inner: TranslationProvider, alias_id: str) -> None:
+        self._inner = inner
+        self.id = alias_id
+        self.display_name = getattr(inner, "display_name", alias_id)
+
+    def requires_credential(self) -> bool:
+        return self._inner.requires_credential()
+
+    def list_languages(self) -> Sequence[Language]:
+        return self._inner.list_languages()
+
+    def translate(
+        self,
+        request: TranslationRequest,
+        credential: str | None,
+        cancel: CancelToken | None = None,
+    ) -> TranslationResult:
+        return self._inner.translate(request, credential, cancel)
 
 
 @dataclass(frozen=True)
@@ -96,11 +131,42 @@ class ProviderRegistry:
         self._credential_store = credential_store
         self._warnings: list[str] = []
 
+        # Cache kredensial agar is_available()/get_info() tidak memanggil
+        # Secret Service (D-Bus sinkron) berulang kali di main thread.
+        # Invalidasi dilakukan lewat invalidate_credential_cache().
+        self._credential_cache: dict[str, str | None] = {}
+        self._credential_cache_lock = threading.Lock()
+
         # Daftarkan provider bawaan
         self.register(GoogleFreeProvider())
         self.register(OpenAICompatibleProvider())
         self.register(LibreTranslateProvider())
         self.register(DeepLProvider())
+
+        if self._credential_store is not None and hasattr(self._credential_store, "connect_changed"):
+            self._credential_store.connect_changed(self.invalidate_credential_cache)
+
+    def invalidate_credential_cache(self, provider_id: str | None = None) -> None:
+        """Invalidasi cache kredensial.
+
+        Dipanggil setelah pengguna menyimpan/menghapus kredensial di UI,
+        atau setelah ConfigStore berubah, agar is_available() akurat.
+        ``provider_id=None`` membersihkan seluruh cache.
+        """
+        with self._credential_cache_lock:
+            if provider_id is None:
+                self._credential_cache.clear()
+            else:
+                self._credential_cache.pop(provider_id, None)
+
+    def _get_credential_cached(self, provider_id: str) -> str | None:
+        with self._credential_cache_lock:
+            if provider_id in self._credential_cache:
+                return self._credential_cache[provider_id]
+        cred = self._credential_store.get(provider_id) if self._credential_store else None
+        with self._credential_cache_lock:
+            self._credential_cache[provider_id] = cred
+        return cred
 
     def apply_llm_settings(self, endpoint_url: str, model: str) -> None:
         """Terapkan endpoint/model LLM dari pengaturan ke provider 'openai'."""
@@ -202,7 +268,7 @@ class ProviderRegistry:
         if self._credential_store is None:
             return False
 
-        cred = self._credential_store.get(provider.id)
+        cred = self._get_credential_cached(provider.id)
         return bool(cred and cred.strip())
 
     def get_info(self, provider_id: str) -> ProviderInfo | None:
@@ -221,7 +287,7 @@ class ProviderRegistry:
                 reason="CredentialStore tidak dikonfigurasi",
             )
 
-        cred = self._credential_store.get(provider.id)
+        cred = self._get_credential_cached(provider.id)
         if not cred or not cred.strip():
             return ProviderInfo(
                 provider=provider,
@@ -248,6 +314,14 @@ class ProviderRegistry:
         for entry in entries:
             try:
                 provider = load_provider_from_string(entry.module)
+                if entry.id != provider.id:
+                    logger.warning(
+                        "Konfigurasi [[providers]] id=%r berbeda dengan provider.id=%r; "
+                        "menggunakan entry.id sebagai alias kunci registri.",
+                        entry.id,
+                        provider.id,
+                    )
+                provider = _ProviderAlias(provider, entry.id)
                 self.register(provider)
             except Exception as exc:
                 msg = f"Gagal memuat provider '{entry.id}' dari {entry.module}: {exc}"

@@ -96,6 +96,10 @@ def post_json(
         raise TranslationError(
             "network", provider_id, f"Layanan tidak dapat dijangkau: {err.reason}"
         ) from err
+    except OSError as err:
+        raise TranslationError(
+            "network", provider_id, f"Kegagalan soket/jaringan: {err}"
+        ) from err
 
     if cancel is not None and cancel.cancelled:
         raise TranslationError("cancelled", provider_id, "Permintaan terjemahan dibatalkan")

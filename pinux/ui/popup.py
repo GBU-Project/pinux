@@ -79,10 +79,12 @@ class PopupWindow(Gtk.Window):
         on_trigger_ocr: Callable[[], None] | None = None,
         on_ocr_file: Callable[[], None] | None = None,
         on_speak: Callable[[str, str | None], None] | None = None,
+        on_stop_speak: Callable[[], None] | None = None,
         on_toggle_favorite: Callable[[int], bool | None] | None = None,
         on_show_history: Callable[[], None] | None = None,
         tts_available: bool = False,
         pin_default: bool = False,
+        close_on_blur: bool = True,
         continuous_ocr_default: bool = False,
         on_continuous_ocr_toggled: Callable[[bool], None] | None = None,
         width: int = 420,
@@ -98,6 +100,9 @@ class PopupWindow(Gtk.Window):
         self._on_ocr_file = on_ocr_file
         self._on_continuous_ocr_toggled = on_continuous_ocr_toggled
         self._on_speak = on_speak
+        self._on_stop_speak = on_stop_speak
+        self._is_speaking_source: bool = False
+        self._is_speaking_result: bool = False
         self._on_toggle_favorite = on_toggle_favorite
         self._on_show_history = on_show_history
         self._current_entry_id: int | None = None
@@ -105,6 +110,7 @@ class PopupWindow(Gtk.Window):
         self._detected_lang: str | None = None
 
         self._pinned: bool = pin_default
+        self._close_on_blur: bool = close_on_blur
         self._continuous_ocr: bool = continuous_ocr_default
 
         self._ignore_text_changes: bool = False
@@ -117,7 +123,7 @@ class PopupWindow(Gtk.Window):
         # Pengaturan jendela
         self.set_decorated(False)
         self.set_resizable(True)
-        self.set_default_size(width, 240)
+        self.set_default_size(width, 480)
         self.add_css_class("pinux-popup-window")
 
         self._build_ui()
@@ -133,6 +139,7 @@ class PopupWindow(Gtk.Window):
         self._pinned = bool(value)
         if hasattr(self, "_pin_button"):
             self._pin_button.set_active(self._pinned)
+        self._update_pin_button_style()
 
     @property
     def source_text(self) -> str:
@@ -152,10 +159,10 @@ class PopupWindow(Gtk.Window):
         main_box.set_margin_start(14)
         main_box.set_margin_end(14)
 
-        # Baris Header / Kontrol
+        # 1. Baris Header / Kontrol (Bahasa, Tukar, Deteksi, Refresh, Pengaturan/Info, Jendela Penuh, Pin)
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        # Dropdown Bahasa Sumber ala Bob
+        # Dropdown Bahasa Sumber
         src_labels = [name for _, name in self.LANGUAGES]
         self._src_dropdown = Gtk.DropDown.new_from_strings(src_labels)
         self._src_dropdown.set_selected(0)  # auto
@@ -169,7 +176,7 @@ class PopupWindow(Gtk.Window):
         self._swap_button.connect("clicked", self._on_swap_clicked)
         header_box.append(self._swap_button)
 
-        # Dropdown Bahasa Tujuan ala Bob (tanpa 'auto')
+        # Dropdown Bahasa Tujuan
         self._target_languages = [lang for lang in self.LANGUAGES if lang[0] != "auto"]
         tgt_labels = [name for _, name in self._target_languages]
         self._tgt_dropdown = Gtk.DropDown.new_from_strings(tgt_labels)
@@ -182,74 +189,47 @@ class PopupWindow(Gtk.Window):
         self._lang_label = Gtk.Label(label="")
         self._lang_label.set_xalign(0.0)
         self._lang_label.set_hexpand(True)
+        self._lang_label.add_css_class("caption")
         self._lang_label.add_css_class("dim-label")
         header_box.append(self._lang_label)
 
-        # Tombol OCR
-        self._ocr_button = Gtk.Button(icon_name="camera-photo-symbolic")
-        self._ocr_button.set_tooltip_text("Pilih area layar untuk OCR")
-        self._ocr_button.connect("clicked", self._on_ocr_clicked)
-        header_box.append(self._ocr_button)
+        # Tombol Buka sebagai Jendela Penuh (P2)
+        self._expand_button = Gtk.Button(icon_name="view-fullscreen-symbolic")
+        self._expand_button.set_tooltip_text("Buka sebagai jendela terpisah (untuk teks panjang)")
+        self._expand_button.connect("clicked", self._on_expand_clicked)
+        header_box.append(self._expand_button)
 
-        # Tombol OCR dari berkas gambar
-        self._ocr_file_button = Gtk.Button(icon_name="insert-image-symbolic")
-        self._ocr_file_button.set_tooltip_text("OCR dari berkas gambar")
-        self._ocr_file_button.connect("clicked", self._on_ocr_file_clicked)
-        self._ocr_file_button.set_visible(self._on_ocr_file is not None)
-        header_box.append(self._ocr_file_button)
-
-        # Tombol OCR kontinu (append teks baru ke kotak teks)
-        self._continuous_ocr_button = Gtk.ToggleButton(icon_name="list-add-symbolic")
-        self._continuous_ocr_button.set_tooltip_text("Mode OCR kontinu: tambahkan hasil baru ke teks sumber")
-        self._continuous_ocr_button.set_active(self._continuous_ocr)
-        self._continuous_ocr_button.connect("toggled", self._on_continuous_ocr_toggled_internal)
-        header_box.append(self._continuous_ocr_button)
-
-
-        # Tombol suara (TTS): ucapkan teks sumber / hasil terjemahan
-        self._speak_source_button = Gtk.Button(icon_name="audio-speakers-symbolic")
-        self._speak_source_button.set_tooltip_text("Bacakan teks sumber")
-        self._speak_source_button.connect("clicked", self._on_speak_source_clicked)
-        self._speak_source_button.set_visible(self._tts_available)
-        header_box.append(self._speak_source_button)
-
-        self._speak_result_button = Gtk.Button(icon_name="audio-volume-high-symbolic")
-        self._speak_result_button.set_tooltip_text("Bacakan hasil terjemahan")
-        self._speak_result_button.connect("clicked", self._on_speak_result_clicked)
-        self._speak_result_button.set_visible(self._tts_available)
-        header_box.append(self._speak_result_button)
-
-        # Tombol Favorit & Riwayat
-        self._fav_button = Gtk.ToggleButton(icon_name="starred-symbolic")
-        self._fav_button.set_tooltip_text("Tandai terjemahan ini sebagai favorit")
-        self._fav_button.set_sensitive(False)
-        self._fav_button.connect("toggled", self._on_fav_toggled)
-        header_box.append(self._fav_button)
-
-        self._history_button = Gtk.Button(icon_name="document-open-recent-symbolic")
-        self._history_button.set_tooltip_text("Riwayat terjemahan")
-        self._history_button.connect("clicked", self._on_history_clicked)
-        self._history_button.set_visible(self._on_show_history is not None)
-        header_box.append(self._history_button)
-
-        # Tombol Salin
-        self._copy_button = Gtk.Button(icon_name="edit-copy-symbolic")
-        self._copy_button.set_tooltip_text("Salin hasil terjemahan (Ctrl+Shift+C)")
-        self._copy_button.connect("clicked", self._on_copy_clicked)
-        header_box.append(self._copy_button)
-
-        # Tombol Pin
+        # Tombol Pin (kanan atas)
         self._pin_button = Gtk.ToggleButton(icon_name="view-pin-symbolic")
         self._pin_button.set_tooltip_text("Pertahankan jendela tetap terbuka (Ctrl+P)")
         self._pin_button.set_active(self._pinned)
         self._pin_button.connect("toggled", self._on_pin_toggled)
+        self._update_pin_button_style()
         header_box.append(self._pin_button)
 
         main_box.append(header_box)
 
-        # Input Source_Text
-        # Multi-baris: Enter menerjemahkan, Shift+Enter menyisipkan baris baru
-        # (seperti jendela input Bob).
+        # 2. Kotak Teks Sumber (Source) dengan header kecil
+        source_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        
+        source_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._source_title_label = Gtk.Label(label="Sumber")
+        self._source_title_label.add_css_class("caption")
+        self._source_title_label.add_css_class("dim-label")
+        self._source_title_label.set_xalign(0.0)
+        self._source_title_label.set_hexpand(True)
+        source_header.append(self._source_title_label)
+
+        # Tombol TTS teks sumber (kontekstual di area sumber)
+        self._speak_source_button = Gtk.Button(icon_name="audio-speakers-symbolic")
+        self._speak_source_button.set_tooltip_text("Bacakan teks sumber (TTS)")
+        self._speak_source_button.connect("clicked", self._on_speak_source_clicked)
+        self._speak_source_button.set_visible(self._tts_available)
+        self._speak_source_button.add_css_class("flat")
+        source_header.append(self._speak_source_button)
+        source_container.append(source_header)
+
+        # Input Source_Text (multi-baris)
         self._entry = SourceTextView()
         self._entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self._entry.set_accepts_tab(False)
@@ -265,13 +245,63 @@ class PopupWindow(Gtk.Window):
         self._entry_scroller.set_max_content_height(160)
         self._entry_scroller.set_propagate_natural_height(True)
         self._entry_scroller.add_css_class("card")
-        main_box.append(self._entry_scroller)
+        source_container.append(self._entry_scroller)
 
-        # Spinner & Kontainer Hasil
+        main_box.append(source_container)
+
+        # Pemisah visual jelas antara panel Teks Sumber & Hasil Terjemahan
+        self._separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        main_box.append(self._separator)
+
+        # Spinner status
         self._spinner = Gtk.Spinner()
         self._spinner.set_spinning(False)
         self._spinner.set_visible(False)
         main_box.append(self._spinner)
+
+        # 3. Kotak Hasil Terjemahan dengan header kontekstual (TTS Hasil & Salin)
+        result_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        result_container.set_vexpand(True)
+
+        result_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._result_title_label = Gtk.Label(label="Terjemahan")
+        self._result_title_label.add_css_class("caption")
+        self._result_title_label.add_css_class("dim-label")
+        self._result_title_label.set_xalign(0.0)
+        self._result_title_label.set_hexpand(True)
+        result_header.append(self._result_title_label)
+
+        # Aksi kontekstual hasil: TTS Hasil
+        self._speak_result_button = Gtk.Button(icon_name="audio-volume-high-symbolic")
+        self._speak_result_button.set_tooltip_text("Bacakan hasil terjemahan (TTS)")
+        self._speak_result_button.connect("clicked", self._on_speak_result_clicked)
+        self._speak_result_button.set_visible(self._tts_available)
+        self._speak_result_button.add_css_class("flat")
+        result_header.append(self._speak_result_button)
+
+        # Aksi kontekstual hasil: Salin
+        self._copy_button = Gtk.Button(icon_name="edit-copy-symbolic")
+        self._copy_button.set_tooltip_text("Salin hasil terjemahan (Ctrl+Shift+C)")
+        self._copy_button.connect("clicked", self._on_copy_clicked)
+        self._copy_button.add_css_class("flat")
+        result_header.append(self._copy_button)
+
+        result_container.append(result_header)
+
+        # Isi kartu hasil yang dapat discroll
+        result_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        result_box.set_margin_top(8)
+        result_box.set_margin_bottom(8)
+        result_box.set_margin_start(10)
+        result_box.set_margin_end(10)
+
+        # Label Fonetik / Simbol Lafal (Kamus ala Bob)
+        self._phonetic_label = Gtk.Label(label="")
+        self._phonetic_label.set_xalign(0.0)
+        self._phonetic_label.add_css_class("caption")
+        self._phonetic_label.add_css_class("dim-label")
+        self._phonetic_label.set_visible(False)
+        result_box.append(self._phonetic_label)
 
         # Label Hasil Terjemahan
         self._result_label = Gtk.Label(label="")
@@ -280,20 +310,12 @@ class PopupWindow(Gtk.Window):
         self._result_label.set_xalign(0.0)
         self._result_label.set_yalign(0.0)
         self._result_label.set_vexpand(True)
-        main_box.append(self._result_label)
-
-        # Label Fonetik / Simbol Lafal (Kamus ala Bob)
-        self._phonetic_label = Gtk.Label(label="")
-        self._phonetic_label.set_xalign(0.0)
-        self._phonetic_label.add_css_class("caption")
-        self._phonetic_label.add_css_class("dim-label")
-        self._phonetic_label.set_visible(False)
-        main_box.append(self._phonetic_label)
+        result_box.append(self._result_label)
 
         # Kontainer Kamus Kata Tunggal (Part of speech & sinonim)
         self._dict_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._dict_box.set_visible(False)
-        main_box.append(self._dict_box)
+        result_box.append(self._dict_box)
 
         # Label Galat
         self._error_label = Gtk.Label(label="")
@@ -301,15 +323,80 @@ class PopupWindow(Gtk.Window):
         self._error_label.set_xalign(0.0)
         self._error_label.add_css_class("error")
         self._error_label.set_visible(False)
-        main_box.append(self._error_label)
+        result_box.append(self._error_label)
+
+        self._result_scroller = Gtk.ScrolledWindow()
+        self._result_scroller.set_child(result_box)
+        self._result_scroller.set_min_content_height(80)
+        self._result_scroller.set_max_content_height(600)
+        self._result_scroller.set_propagate_natural_height(True)
+        self._result_scroller.set_vexpand(True)
+        self._result_scroller.add_css_class("card")
+        result_container.append(self._result_scroller)
 
         # Kontainer Layanan Tambahan (Mode Bandingkan)
         self._alternatives_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._alternatives_box.set_visible(False)
-        main_box.append(self._alternatives_box)
+        result_container.append(self._alternatives_box)
 
+        main_box.append(result_container)
+
+        # 4. Toolbar Bawah untuk OCR & Utilitas (Riwayat, Favorit)
+        bottom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        # Tombol OCR Layar
+        self._ocr_button = Gtk.Button(icon_name="camera-photo-symbolic")
+        self._ocr_button.set_tooltip_text("Pilih area layar untuk OCR")
+        self._ocr_button.connect("clicked", self._on_ocr_clicked)
+        bottom_box.append(self._ocr_button)
+
+        # Tombol OCR dari berkas gambar
+        self._ocr_file_button = Gtk.Button(icon_name="insert-image-symbolic")
+        self._ocr_file_button.set_tooltip_text("OCR dari berkas gambar")
+        self._ocr_file_button.connect("clicked", self._on_ocr_file_clicked)
+        self._ocr_file_button.set_visible(self._on_ocr_file is not None)
+        bottom_box.append(self._ocr_file_button)
+
+        # Tombol OCR kontinu (append)
+        self._continuous_ocr_button = Gtk.ToggleButton(icon_name="list-add-symbolic")
+        self._continuous_ocr_button.set_tooltip_text("Mode OCR kontinu: tambahkan hasil baru ke teks sumber")
+        self._continuous_ocr_button.set_active(self._continuous_ocr)
+        self._continuous_ocr_button.connect("toggled", self._on_continuous_ocr_toggled_internal)
+        bottom_box.append(self._continuous_ocr_button)
+
+        # Spacer expander
+        bottom_spacer = Gtk.Box()
+        bottom_spacer.set_hexpand(True)
+        bottom_box.append(bottom_spacer)
+
+        # Tombol Favorit
+        self._fav_button = Gtk.ToggleButton(icon_name="starred-symbolic")
+        self._fav_button.set_tooltip_text("Tandai terjemahan ini sebagai favorit")
+        self._fav_button.set_sensitive(False)
+        self._fav_button.connect("toggled", self._on_fav_toggled)
+        bottom_box.append(self._fav_button)
+
+        # Tombol Riwayat
+        self._history_button = Gtk.Button(icon_name="document-open-recent-symbolic")
+        self._history_button.set_tooltip_text("Riwayat terjemahan")
+        self._history_button.connect("clicked", self._on_history_clicked)
+        self._history_button.set_visible(self._on_show_history is not None)
+        bottom_box.append(self._history_button)
+
+        main_box.append(bottom_box)
 
         self.set_child(main_box)
+
+    def _update_pin_button_style(self) -> None:
+        """Perbarui status visual tombol pin (suggested-action saat aktif)."""
+        if not hasattr(self, "_pin_button"):
+            return
+        if self._pinned:
+            self._pin_button.add_css_class("suggested-action")
+            self._pin_button.set_tooltip_text("Jendela disematkan (tidak menutup otomatis). Klik untuk melepas (Ctrl+P)")
+        else:
+            self._pin_button.remove_css_class("suggested-action")
+            self._pin_button.set_tooltip_text("Pertahankan jendela tetap terbuka (Ctrl+P)")
 
     def _setup_events(self) -> None:
         """Pasang event controller untuk fokus dan tombol keyboard."""
@@ -370,7 +457,7 @@ class PopupWindow(Gtk.Window):
         return False
 
     def _on_is_active_changed(self, obj: Any, param: Any) -> None:
-        if self._pinned:
+        if self._pinned or not self._close_on_blur:
             return
         if not self.is_active():
             # Bila popover dropdown sedang terbuka, GTK memindahkan fokus ke popover.
@@ -429,13 +516,42 @@ class PopupWindow(Gtk.Window):
         if self._on_trigger_ocr is not None:
             self._on_trigger_ocr()
 
+    def stop_speaking(self) -> None:
+        """Hentikan ucapan yang sedang berjalan dan reset ikon tombol."""
+        if self._on_stop_speak is not None:
+            self._on_stop_speak()
+        self._is_speaking_source = False
+        self._is_speaking_result = False
+        if hasattr(self, "_speak_source_button"):
+            self._speak_source_button.set_icon_name("audio-speakers-symbolic")
+            self._speak_source_button.set_tooltip_text("Bacakan teks sumber (TTS)")
+        if hasattr(self, "_speak_result_button"):
+            self._speak_result_button.set_icon_name("audio-volume-high-symbolic")
+            self._speak_result_button.set_tooltip_text("Bacakan hasil terjemahan (TTS)")
+
     def _on_speak_source_clicked(self, btn: Gtk.Button) -> None:
+        if self._is_speaking_source:
+            self.stop_speaking()
+            return
+
         text = self.source_text.strip()
         if text and self._on_speak is not None:
+            self.stop_speaking()
+            self._is_speaking_source = True
+            btn.set_icon_name("media-playback-stop-symbolic")
+            btn.set_tooltip_text("Hentikan suara (TTS)")
             self._on_speak(text, self._current_source_lang or self._detected_lang)
 
     def _on_speak_result_clicked(self, btn: Gtk.Button) -> None:
+        if self._is_speaking_result:
+            self.stop_speaking()
+            return
+
         if self._current_result_text and self._on_speak is not None:
+            self.stop_speaking()
+            self._is_speaking_result = True
+            btn.set_icon_name("media-playback-stop-symbolic")
+            btn.set_tooltip_text("Hentikan suara (TTS)")
             self._on_speak(self._current_result_text, self._current_target_lang)
 
     def set_current_entry(self, entry_id: int | None, favorite: bool = False) -> None:
@@ -481,12 +597,50 @@ class PopupWindow(Gtk.Window):
 
     def _on_pin_toggled(self, btn: Gtk.ToggleButton) -> None:
         self._pinned = btn.get_active()
+        self._update_pin_button_style()
 
+    def _on_expand_clicked(self, btn: Gtk.Button) -> None:
+        """Buka hasil terjemahan saat ini di jendela terpisah mandiri (P2)."""
+        source = self.source_text
+        result = self._current_result_text
+        if not result and not source:
+            return
+        from pinux.ui.translation_window import TranslationWindow
+
+        win = TranslationWindow(source, result)
+        win.present()
+        if not self._pinned:
+            self.hide()
 
     def present_at_cursor(self, x: int, y: int) -> None:
-        """Tampilkan jendela popup pada posisi kursor dengan offset 16 piksel (R1.4)."""
-        # Pada GTK4 Wayland, penempatan jendela absolut dikendalikan compositor
-        # tetapi present() menampilkan dan memfokuskan jendela.
+        """Tampilkan jendela popup pada posisi kursor dengan offset 16 piksel, di-clamp ke workarea (R1.4)."""
+        offset = 16
+        try:
+            display = Gdk.Display.get_default()
+            if display is not None:
+                # Cari monitor terdekat pada koordinat (x, y)
+                monitor = display.get_monitor_at_point(x, y) if hasattr(display, "get_monitor_at_point") else None
+                if monitor is None:
+                    monitors = display.get_monitors()
+                    if monitors and monitors.get_n_items() > 0:
+                        monitor = monitors.get_item(0)
+
+                if monitor is not None:
+                    workarea = monitor.get_geometry()
+                    if hasattr(monitor, "get_workarea"):
+                        wa = monitor.get_workarea()
+                        if wa and wa.width > 0 and wa.height > 0:
+                            workarea = wa
+
+                    # Batasi tinggi scroller bila monitor beresolusi rendah / jendela mendekati batas layar
+                    avail_h = workarea.height - (2 * offset)
+                    if hasattr(self, "_result_scroller") and avail_h > 200:
+                        max_res_h = min(600, max(120, avail_h - 220))
+                        self._result_scroller.set_max_content_height(max_res_h)
+        except Exception as exc:
+            logger.debug(f"Pengecekan workarea monitor dilewati: {exc}")
+
+        # Tampilkan dan fokuskan jendela
         self.present()
 
     def focus_input(self) -> None:
@@ -694,6 +848,14 @@ class PopupWindow(Gtk.Window):
         self._detected_lang = getattr(result, "detected_source_lang", None)
         self._result_label.set_text(result.text)
         self._result_label.set_visible(True)
+
+        # Perbarui label judul section
+        src_tag = (self._detected_lang or self._current_source_lang or "").upper()
+        tgt_tag = (self._current_target_lang or "").upper()
+        if hasattr(self, "_source_title_label"):
+            self._source_title_label.set_text(f"Sumber ({src_tag})" if src_tag else "Sumber")
+        if hasattr(self, "_result_title_label"):
+            self._result_title_label.set_text(f"Terjemahan ({tgt_tag})" if tgt_tag else "Terjemahan")
 
         # Tampilkan fonetik & kamus bila tersedia (kata tunggal ala Bob)
         phonetic = getattr(result, "phonetic", "")

@@ -132,7 +132,7 @@ class RegionOverlay(Gtk.Window):
         self._picture: Gtk.Picture | None = None
         self._selection_box: Gtk.Box | None = None
         self._shot_root: Gtk.Overlay | None = None
-        self._capture_token = 0
+        self._capture_token: object = object()
 
         self._start_x: float = 0.0
         self._start_y: float = 0.0
@@ -172,7 +172,7 @@ class RegionOverlay(Gtk.Window):
         menerima ``Rect`` koordinat jendela.
 
         Dengan ``screenshot_provider``: tangkapan layar diambil dahulu di thread
-        latar (setelah ``capture_delay_s`` agar jendela lain sempat hilang),
+        latar (setafter ``capture_delay_s`` agar jendela lain sempat hilang),
         ditampilkan layar penuh sebagai latar, dan ``on_image`` menerima PNG
         hasil potongan yang sudah dalam piksel citra.
         """
@@ -184,12 +184,13 @@ class RegionOverlay(Gtk.Window):
 
         if screenshot_provider is None:
             self._shot_png = None
+            self.set_child(self._drawing_area)
             self.maximize()
             self.present()
             return
 
-        self._capture_token += 1
-        token = self._capture_token
+        token = object()
+        self._capture_token = token
 
         def _capture() -> None:
             try:
@@ -203,13 +204,13 @@ class RegionOverlay(Gtk.Window):
 
         threading.Thread(target=_capture, daemon=True).start()
 
-    def _capture_failed(self, token: int, exc: Exception) -> bool:
-        if token == self._capture_token and self._on_error is not None:
+    def _capture_failed(self, token: object, exc: Exception) -> bool:
+        if token is self._capture_token and self._on_error is not None:
             self._on_error(exc)
         return False
 
-    def _show_frozen_frame(self, token: int, png: bytes) -> bool:
-        if token != self._capture_token:
+    def _show_frozen_frame(self, token: object, png: bytes) -> bool:
+        if token is not self._capture_token:
             return False  # dibatalkan/digantikan selagi menunggu
         try:
             _install_overlay_css()
@@ -233,15 +234,18 @@ class RegionOverlay(Gtk.Window):
         fixed = Gtk.Fixed()
         fixed.put(box, 0, 0)
 
+        # Letakkan DrawingArea di atas Picture agar efek dim cutout tetap aktif
         root = Gtk.Overlay()
         root.set_child(picture)
+        root.add_overlay(self._drawing_area)
         root.add_overlay(fixed)
         self._picture, self._selection_box, self._shot_root = picture, box, root
         self._fixed = fixed
 
         self.set_child(root)
         self.fullscreen()
-        self.present()
+        # Berikan 1 tick main loop agar fullscreen terpetakan sempurna di Wayland
+        GLib.idle_add(self.present)
         return False
 
     def _finish_frozen_selection(self, rect: "Rect") -> None:
@@ -350,7 +354,7 @@ class RegionOverlay(Gtk.Window):
         state: Gdk.ModifierType,
     ) -> bool:
         if keyval == Gdk.KEY_Escape:
-            self._capture_token += 1  # batalkan tangkapan yang masih berjalan
+            self._capture_token = object()  # batalkan tangkapan yang masih berjalan
             self.hide()
             if self._on_cancelled is not None:
                 self._on_cancelled()

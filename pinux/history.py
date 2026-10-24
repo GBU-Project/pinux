@@ -73,6 +73,7 @@ class HistoryStore:
                 os.close(fd)
         self._conn = sqlite3.connect(str(target), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._closed = False
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
 
@@ -194,4 +195,6 @@ class HistoryStore:
 
     def close(self) -> None:
         with self._lock:
-            self._conn.close()
+            if not self._closed:
+                self._closed = True
+                self._conn.close()

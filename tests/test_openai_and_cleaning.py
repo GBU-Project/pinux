@@ -122,5 +122,5 @@ def test_invalid_llm_endpoint_falls_back(tmp_path):
     path = tmp_path / "pinux.toml"
     path.write_text('[llm]\nendpoint_url = "ftp://x"\nmodel = "m"\n')
     loaded = ConfigStore(path=path).load()
-    assert loaded.llm.endpoint_url.startswith("https://api.openai.com")
+    assert loaded.llm.endpoint_url.startswith("http://localhost:11434")
     assert loaded.llm.model == "m"

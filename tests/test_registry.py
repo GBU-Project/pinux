@@ -172,4 +172,29 @@ def test_property_9_isolated_provider_loading(items: list[tuple[str, str]]) -> N
     # Setiap entri yang valid harus berhasil termuat tanpa terganggu yang gagal
     for idx, (k, mod) in enumerate(items):
         if k == "valid":
-            assert reg.get("deepl") is not None
+            # Karena alias dibungkus dengan ProviderEntry.id
+            prov_id = f"prov_{idx}_{k}"
+            assert reg.get(prov_id) is not None
+
+
+def test_provider_alias_overrides_id():
+    from pinux.translate.registry import _ProviderAlias
+
+    class DummyProvider:
+        id = "dummy"
+        display_name = "Dummy"
+
+        def requires_credential(self):
+            return False
+
+        def list_languages(self):
+            return []
+
+        def translate(self, req, cred, cancel=None):
+            return None
+
+    alias = _ProviderAlias(DummyProvider(), "dummy-custom")
+    assert alias.id == "dummy-custom"
+    assert alias.display_name == "Dummy"
+    assert alias.requires_credential() is False
+    assert alias.list_languages() == []

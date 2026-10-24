@@ -56,6 +56,7 @@ class OcrWorkerClient:
         self._worker_cmd = worker_cmd or [sys.executable, "-m", "pinux.ocr.worker"]
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self._reader_thread: threading.Thread | None = None
         self._next_id = 1
         self._last_active_time = time.monotonic()
 
@@ -109,13 +110,18 @@ class OcrWorkerClient:
                         time.monotonic() - self._last_active_time >= IDLE_TIMEOUT_SECONDS
                     ):
                         logger.info("Menghentikan pekerja OCR yang menganggur.")
-                        self._kill_proc()
+                        self._kill_proc_locked()
                 finally:
                     self._lock.release()
                 return
 
     def _kill_proc(self) -> None:
-        """Hentikan subproses pekerja dengan SIGTERM."""
+        """Hentikan subproses pekerja dengan SIGTERM (thread-safe wrapper)."""
+        with self._lock:
+            self._kill_proc_locked()
+
+    def _kill_proc_locked(self) -> None:
+        """Hentikan subproses dan bersihkan thread (harus dipanggil dengan _lock)."""
         if self._proc is not None:
             try:
                 self._proc.terminate()
@@ -132,6 +138,13 @@ class OcrWorkerClient:
                 except Exception:
                     pass
             self._proc = None
+
+        if self._reader_thread is not None and self._reader_thread is not threading.current_thread():
+            try:
+                self._reader_thread.join(timeout=1.0)
+            except Exception:
+                pass
+            self._reader_thread = None
 
     def ensure_model(self, on_progress: Callable[[float], None] | None = None) -> None:
         """Kirim permintaan ensure_model ke pekerja OCR."""
@@ -182,6 +195,7 @@ class OcrWorkerClient:
         if cancel is not None and cancel.cancelled:
             raise RuntimeError("Permintaan OCR dibatalkan")
 
+        # 1. Inisialisasi proses & kirim permintaan (di bawah kunci, cepat)
         with self._lock:
             self._last_active_time = time.monotonic()
             proc = self._ensure_proc()
@@ -196,82 +210,82 @@ class OcrWorkerClient:
                 proc.stdin.write(req_line)
                 proc.stdin.flush()
             except BrokenPipeError:
-                self._kill_proc()
+                self._kill_proc_locked()
                 raise RuntimeError("Pekerja OCR berhenti tak terduga")
 
-            # Pantau stdout dengan dukungan pembatalan
-            result_container: list[dict] = []
-            error_container: list[Exception] = []
+        # 2. Pantau stdout di luar kunci agar pembatalan/permintaan lain tidak deadlock
+        result_container: list[dict] = []
+        error_container: list[Exception] = []
 
-            def _read_loop() -> None:
-                try:
-                    while True:
-                        line = proc.stdout.readline()
-                        if not line:
-                            error_container.append(
-                                RuntimeError("Koneksi ke pekerja OCR terputus")
-                            )
-                            return
-                        try:
-                            msg = decode_message(line)
-                        except ValueError:
-                            continue
-                        # Abaikan pesan basi milik permintaan lain (mis. progress
-                        # ensure_model) agar tidak terbaca sebagai hasil.
-                        if msg.get("id") != req_id:
-                            continue
-                        if "result" not in msg and "error" not in msg:
-                            continue
-                        result_container.append(msg)
+        def _read_loop() -> None:
+            try:
+                while True:
+                    if self._proc is not proc:
                         return
-                except Exception as exc:
-                    error_container.append(exc)
+                    line = proc.stdout.readline()
+                    if not line:
+                        error_container.append(
+                            RuntimeError("Koneksi ke pekerja OCR terputus")
+                        )
+                        return
+                    try:
+                        msg = decode_message(line)
+                    except ValueError:
+                        continue
+                    if msg.get("id") != req_id:
+                        continue
+                    if "result" not in msg and "error" not in msg:
+                        continue
+                    result_container.append(msg)
+                    return
+            except Exception as exc:
+                error_container.append(exc)
 
-            reader_thread = threading.Thread(target=_read_loop, daemon=True)
-            reader_thread.start()
+        self._reader_thread = threading.Thread(target=_read_loop, daemon=True)
+        self._reader_thread.start()
 
-            deadline = time.monotonic() + timeout_s
-            while reader_thread.is_alive():
-                if cancel is not None and cancel.cancelled:
-                    # Pembatalan via SIGTERM ke pekerja OCR sesuai design.md
-                    self._kill_proc()
-                    raise RuntimeError("Permintaan OCR dibatalkan")
-                if time.monotonic() > deadline:
-                    self._kill_proc()
-                    raise RuntimeError(f"OCR melebihi batas waktu {timeout_s:.0f} detik")
-                reader_thread.join(timeout=0.05)
+        deadline = time.monotonic() + timeout_s
+        while self._reader_thread.is_alive():
+            if cancel is not None and cancel.cancelled:
+                with self._lock:
+                    self._kill_proc_locked()
+                raise RuntimeError("Permintaan OCR dibatalkan")
+            if time.monotonic() > deadline:
+                with self._lock:
+                    self._kill_proc_locked()
+                raise RuntimeError(f"OCR melebihi batas waktu {timeout_s:.0f} detik")
+            self._reader_thread.join(timeout=0.05)
 
-            if error_container:
-                # Pekerja mati/terputus: lepaskan agar panggilan berikutnya
-                # menjalankan ulang, tanpa menunggu poll() melihat kematiannya.
-                self._kill_proc()
-                raise error_container[0]
+        if error_container:
+            with self._lock:
+                self._kill_proc_locked()
+            raise error_container[0]
 
-            if not result_container:
-                raise RuntimeError("Pekerja OCR tidak mengembalikan respons")
+        if not result_container:
+            raise RuntimeError("Pekerja OCR tidak mengembalikan respons")
 
-            msg = result_container[0]
-            if "error" in msg:
-                err = msg["error"]
-                raise RuntimeError(f"Galat pengenalan OCR: {err.get('message')}")
+        msg = result_container[0]
+        if "error" in msg:
+            err = msg["error"]
+            raise RuntimeError(f"Galat pengenalan OCR: {err.get('message')}")
 
-            raw_res = msg.get("result", {})
-            text = raw_res.get("text", "")
-            raw_lines = raw_res.get("lines", [])
+        raw_res = msg.get("result", {})
+        text = raw_res.get("text", "")
+        raw_lines = raw_res.get("lines", [])
 
-            ocr_lines: list[OcrLine] = []
-            for item in raw_lines:
-                box = tuple(item.get("box", (0.0, 0.0, 0.0, 0.0)))
-                line = OcrLine(
-                    text=item.get("text", ""),
-                    confidence=float(item.get("confidence", 0.0)),
-                    box=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
-                )
-                ocr_lines.append(line)
+        ocr_lines: list[OcrLine] = []
+        for item in raw_lines:
+            box = tuple(item.get("box", (0.0, 0.0, 0.0, 0.0)))
+            line = OcrLine(
+                text=item.get("text", ""),
+                confidence=float(item.get("confidence", 0.0)),
+                box=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
+            )
+            ocr_lines.append(line)
 
-            return OcrResult(text=text, lines=tuple(ocr_lines))
+        return OcrResult(text=text, lines=tuple(ocr_lines))
 
     def shutdown(self) -> None:
         """Hentikan subproses pekerja OCR."""
         with self._lock:
-            self._kill_proc()
+            self._kill_proc_locked()

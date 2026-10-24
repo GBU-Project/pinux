@@ -68,6 +68,12 @@ class TtsEngine:
     def backend_name(self) -> str | None:
         return self._backend[0] if self._backend else None
 
+    @property
+    def is_speaking(self) -> bool:
+        """Apakah ada proses TTS yang saat ini sedang berbicara."""
+        with self._lock:
+            return self._proc is not None and self._proc.poll() is None
+
     def speak(self, text: str, lang: str | None = None) -> bool:
         """Ucapkan ``text``; kembalikan False bila tidak ada TTS atau teks kosong."""
         text = text.strip()
@@ -88,11 +94,13 @@ class TtsEngine:
                 logger.warning("TTS gagal dijalankan (%s): %s", name, exc)
                 return False
             self._proc = proc
+        if len(text) > self._max_chars:
+            logger.info("Teks TTS dipotong ke %d karakter (dari %d)", self._max_chars, len(text))
         try:
             assert proc.stdin is not None
             proc.stdin.write(text[: self._max_chars].encode("utf-8"))
             proc.stdin.close()
-        except (OSError, ValueError):
+        except (BrokenPipeError, OSError, ValueError):
             # Proses berhenti sebelum membaca (mis. dihentikan oleh speak berikutnya).
             pass
         return True
@@ -104,12 +112,43 @@ class TtsEngine:
 
     def _stop_locked(self) -> None:
         proc, self._proc = self._proc, None
-        if proc is None:
-            return
-        if proc.poll() is None:
-            proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        if proc is not None:
+            # Hentikan proses secara langsung
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
+
+            # Bersihkan dan tunggu proses di thread latar agar UI tidak freeze
+            def _reap_proc(p: subprocess.Popen) -> None:
+                try:
+                    p.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        p.kill()
+                        p.wait(timeout=1.0)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            threading.Thread(target=_reap_proc, args=(proc,), daemon=True).start()
+
+        # Pada backend spd-say, proses klien spd-say hanya mengirim pesan ke daemon speech-dispatcher.
+        # Untuk menghentikan suara audio yang sedang dimainkan oleh daemon:
+        if self._backend is not None and self._backend[0] == "spd-say":
+            def _cancel_spd() -> None:
+                try:
+                    subprocess.run(
+                        [self._binary or "spd-say", "-C"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=1,
+                        check=False,
+                    )
+                except Exception:
+                    pass
+
+            threading.Thread(target=_cancel_spd, daemon=True).start()
+

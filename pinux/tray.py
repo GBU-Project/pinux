@@ -384,11 +384,15 @@ class TrayItem:
                 on_quit=self._on_quit,
                 version_string=self._version_string,
             )
+            activate_cb = self._on_show_popup or self._on_translate_selection
+            if activate_cb is None:
+                logger.debug("TrayItem: Tidak ada callback activate yang terdefinisi")
+
             self._sni_service = StatusNotifierItemService(
                 bus=bus,
                 object_path=sni_path,
                 menu_path=menu_path,
-                on_activate=self._on_show_popup or self._on_translate_selection,
+                on_activate=activate_cb,
                 on_context_menu=self._on_settings,
             )
 
@@ -407,4 +411,9 @@ class TrayItem:
         self._shown = False
         self._sni_service = None
         self._menu_service = None
-        self._bus_name = None
+        if self._bus_name is not None:
+            try:
+                # Melepaskan nama D-Bus memberi tahu watcher bahwa item telah hilang
+                self._bus_name = None
+            except Exception:
+                pass

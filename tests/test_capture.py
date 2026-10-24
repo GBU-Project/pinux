@@ -33,8 +33,14 @@ class MockClipboardBackend:
     def read_clipboard_text(self) -> str:
         return self._clipboard
 
+    def read_clipboard_text_async(self, callback: Callable[[str], None]) -> None:
+        callback(self._clipboard)
+
     def read_primary_text(self) -> str:
         return self._primary
+
+    def read_primary_text_async(self, callback: Callable[[str], None]) -> None:
+        callback(self._primary)
 
     def write_clipboard_text(self, text: str) -> None:
         self._clipboard = text
@@ -190,6 +196,25 @@ def test_gdk_backend_reads_text_asynchronously():
     assert GdkClipboardBackend._read_text(_FakeAsyncClipboard("halo")) == "halo"
     assert GdkClipboardBackend._read_text(_FakeAsyncClipboard("x", fail=True)) == ""
     assert GdkClipboardBackend._read_text(None) == ""
+
+
+def test_text_capturer_async_mode():
+    backend = MockClipboardBackend(clipboard_text="Async Clip", primary_text="Async Prim")
+    capturer = TextCapturer(backend=backend, session_type="x11")
+
+    res_box = []
+    capturer.read_source_text_async(lambda res: res_box.append(res))
+    assert len(res_box) == 1
+    assert res_box[0].text == "Async Prim"
+    assert res_box[0].origin == "primary"
+
+    # Wayland session
+    capturer_wl = TextCapturer(backend=backend, session_type="wayland")
+    res_wl_box = []
+    capturer_wl.read_source_text_async(lambda res: res_wl_box.append(res))
+    assert len(res_wl_box) == 1
+    assert res_wl_box[0].text == "Async Clip"
+    assert res_wl_box[0].origin == "clipboard"
 
 
 # --- Uji clean_text (Pemrosesan Teks ala Bob) --------------------------------

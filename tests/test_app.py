@@ -33,6 +33,10 @@ def init_adw() -> None:
 def test_trigger_router_request_translate() -> None:
     mock_app = MagicMock()
     mock_app.settings = Settings()
+    def _fake_async(cb, max_chars=5000):
+        cb(CaptureResult(text="Hello world", truncated=False, origin="clipboard"))
+
+    mock_app.text_capturer.read_source_text_async.side_effect = _fake_async
     mock_app.text_capturer.read_source_text.return_value = CaptureResult(
         text="Hello world",
         truncated=False,

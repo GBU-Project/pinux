@@ -451,6 +451,8 @@ class SettingsWindow(Adw.PreferencesWindow):
     def _on_credential_changed(self, entry: Adw.PasswordEntryRow, provider_id: str) -> None:
         secret = entry.get_text()
         self._credential_store.set(provider_id, secret)
+        if hasattr(self._provider_registry, "invalidate_credential_cache"):
+            self._provider_registry.invalidate_credential_cache(provider_id)
 
     def _on_load_model_clicked(self, btn: Gtk.Button) -> None:
         if hasattr(self, "_ocr_progress_bar"):

@@ -64,8 +64,11 @@ class ProviderEntry:
 class LlmSettings:
     """Endpoint dan model untuk provider OpenAI-compatible (Ollama, OpenAI, dll.)."""
 
-    endpoint_url: str = "https://api.openai.com/v1/chat/completions"
-    model: str = "gpt-4o-mini"
+    # Bawaan ke Ollama lokal: aman untuk pengguna baru (tidak mengirim
+    # kredensial ke pihak ketiga secara tak sengaja). Pengguna yang ingin
+    # OpenAI mengubah endpoint ini secara eksplisit di halaman Provider.
+    endpoint_url: str = "http://localhost:11434/v1/chat/completions"
+    model: str = "llama3.2"
 
 
 @dataclass

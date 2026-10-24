@@ -29,6 +29,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.0" date="2026-10-24">
+      <description>
+        <p>Rilis stabil v1.0.0: peningkatan arsitektur provider &amp; cache kredensial, proteksi TTS non-blokir, integrasi visual overlay cutout, perbaikan Wayland clipboard, dan dukungan penuh opsi close-on-blur.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-19">
       <description>
         <p>Fitur baru: OCR dari berkas gambar &amp; kode QR, mode OCR kontinu, kamus kata tunggal &amp; simbol fonetik, akselerasi perangkat keras DRI, dan perbaikan keamanan.</p>

@@ -370,10 +370,20 @@ class ScreenshotPortal:
     def capture_fullscreen(self, parent_window: str) -> bytes: ...   # PNG
 
 class RegionOverlay(Gtk.Window):
-    def open(self, on_selected: Callable[[Rect], None], on_cancelled: Callable[[], None]) -> None: ...
+    def open(
+        self,
+        on_selected: Callable[[Rect], None],
+        on_cancelled: Callable[[], None] | None = None,
+        *,
+        screenshot_provider: Callable[[], bytes] | None = None,
+        on_image: Callable[[bytes], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        capture_delay_s: float = 0.2,
+    ) -> None: ...
 ```
 
-`RegionOverlay` adalah jendela GTK4 tanpa dekorasi yang dimaksimalkan pada monitor tempat kursor berada. Pengguna menyeret untuk memilih area, `Escape` membatalkan (R6.6). Setelah area dipilih, overlay disembunyikan, `ScreenshotPortal.capture_fullscreen` dijalankan, dan citra dipotong secara lokal memakai Pillow memakai koordinat hasil konversi `logical → physical` berdasarkan `Gdk.Surface.get_scale_factor()`.
+Mode *Frozen Frame* (Bingkai Beku):
+Untuk memastikan akurasi seleksi tanpa meleset dari panel sistem atau animasi layar, `RegionOverlay` mengambil tangkapan layar penuh terlebih dahulu melalui `screenshot_provider` di background thread (setelah jeda 0.2s agar jendela popup/aplikasi sempat hilang). Citra PNG ditampilkan layar penuh sebagai latar menggunakan `Gtk.Picture` dengan lapisan `Gtk.DrawingArea` di atasnya untuk menggambar efek redup (dim 45%) dan lubang persegi seleksi terang (*cutout spotlight*). Koordinat logis widget dikonversi secara presisi ke piksel fisik citra menggunakan `scale_to_image()`. Token unik `object()` mencegah *race condition* jika pembatalan Escape ditekan di tengah proses tangkapan layar.
 
 ### PopupWindow
 
@@ -381,29 +391,46 @@ class RegionOverlay(Gtk.Window):
 class PopupWindow(Gtk.Window):
     def present_at_cursor(self, x: int, y: int) -> None: ...
     def set_source_text(self, text: str) -> None: ...
+    def append_source_text(self, text: str, sep: str = "\n\n") -> str: ...
     def show_loading(self) -> None: ...
     def show_result(self, result: TranslationResult) -> None: ...
     def show_error(self, message: str) -> None: ...
     @property
     def pinned(self) -> bool: ...
+    @property
+    def continuous_ocr(self) -> bool: ...
 ```
 
-Widget: `Gtk.Entry` berisi Source_Text, `Gtk.Label` berisi hasil terjemahan, `Gtk.Spinner` indikator kemajuan, dan tombol salin, tukar bahasa, pin, serta OCR. Jendela dibuat satu kali dan dipakai ulang (R1.5), dengan `Gtk.Window.set_decorated(False)` dan `Gtk.Window.set_resizable(True)`.
+Widget & Tata Letak (Struktur 3-Layer Responsif):
+- **Baris Kontrol (Header)**: Dropdown bahasa sumber dan target, indikator deteksi bahasa, tombol terjemahkan ulang (Ctrl+R), tombol pengaturan, tombol perluas ke jendela penuh (`view-fullscreen-symbolic`), dan tombol pin (Ctrl+P) dengan penanda status aktif (`suggested-action`).
+- **Blok Teks Sumber**: Label header teks sumber, tombol audio TTS sumber, dan area entri teks sumber dengan `Gtk.ScrolledWindow`.
+- **Separator Horisontal**: Pemisah visual yang tegas antara teks sumber dan hasil terjemahan.
+- **Blok Hasil Terjemahan (Hero Element)**: Label header hasil terjemahan, tombol putar/hentikan audio TTS hasil, tombol salin ke clipboard, dan area teks hasil dalam `Gtk.ScrolledWindow` dengan pembatasan tinggi dinamis (hingga 600px) dan *word wrap*.
+- **Toolbar Bawah**: Tombol aksi OCR layar penuh, OCR berkas citra, tombol toggle mode OCR kontinu (append), tombol favorit (bintang), dan tombol riwayat terjemahan.
 
-Penanganan fokus: sinyal `notify::is-active` menutup jendela ketika jendela kehilangan fokus dan `pinned` bernilai salah (R5.1). Tombol pin mengubah `pinned` (R5.6). Tombol `Escape` dihubungkan ke aksi tutup (R5.2).
+Penanganan fokus & pintasan:
+- Kehilangan fokus memicu penutupan hanya jika `pinned` bernilai salah dan `close_on_blur` bernilai benar (R5.1).
+- Tombol `Escape` menutup popup (R5.2).
 
-### SettingsWindow
+### TranslationWindow
 
-Jendela `Adw.PreferencesWindow` dengan halaman:
+```python
+class TranslationWindow(Adw.Window):
+    """Jendela mandiri GNOME CSD yang resizable dan draggable untuk membaca teks terjemahan panjang."""
+    def __init__(self, source_text: str = "", result_text: str = "") -> None: ...
+```
+Jendela `Adw.Window` terpisah yang dibuka lewat tombol expand pada `PopupWindow`. Memiliki ukuran bawaan 600x600, dekorasi CSD bawaan sistem (tombol minimize/maximize/close), area sumber terpisah dengan scroller, area hasil terjemahan yang mengisi ruang fleksibel (`vexpand=True`), dan tombol salin cepat di header bar dengan animasi feedback centang.
 
-| Halaman | Isi |
-|---|---|
-| Umum | Target_Language, bahasa cadangan, perilaku pin bawaan, batas karakter |
-| Provider | Daftar Translation_Provider, pemilihan provider aktif, kolom Credential untuk Keyed_Provider |
-| Pintasan | Pintasan hasil pengikatan portal, atau perintah CLI yang perlu diikat manual |
-| OCR | Status ketersediaan OCR_Engine, tombol unduh model, kemajuan unduhan |
+### TtsEngine
 
-Perubahan pengaturan menulis `pinux.toml` dan langsung diterapkan melalui `GObject.Property` binding tanpa menjalankan ulang Pinux (R9.4).
+```python
+class TtsEngine:
+    def speak(self, text: str, lang: str | None = None) -> bool: ...
+    def stop(self) -> None: ...
+    @property
+    def is_speaking(self) -> bool: ...
+```
+Komponen text-to-speech non-blocking yang mendeteksi ketersediaan backend lokal (`spd-say`, `espeak-ng`, `espeak`). Teks dikirim melalui `stdin` agar aman dari flag argumen `-`. Menggunakan *background reaper thread* untuk memastikan operasi `stop()` merespons seketika (0ms delay) di UI, dan memanggil `spd-say -C` saat backend adalah speech-dispatcher guna menghentikan audio daemon seketika.
 
 ### ConfigStore
 
@@ -415,8 +442,15 @@ DEFAULT_SETTINGS = Settings(
     max_chars=5000,
     request_timeout_s=10.0,
     shortcuts={"translate": "<Control><Alt>T", "ocr": "<Control><Alt>O"},
-    popup={"pin_default": False, "width": 420, "close_on_blur": True},
-    ocr={"engine": "rapidocr", "enabled": True},
+    popup=PopupSettings(pin_default=False, width=420, close_on_blur=True),
+    ocr=OcrSettings(engine="rapidocr", enabled=True, continuous_ocr=False),
+    text_processing=TextProcessingSettings(unwrap_lines=False, remove_hyphens=True, remove_comments=False, auto_copy_result=False),
+    llm=LlmSettings(endpoint_url="http://localhost:11434/v1/chat/completions", model="llama3.2"),
+    libretranslate=LibreTranslateSettings(endpoint_url="http://localhost:5000"),
+    history=HistorySettings(enabled=True, max_entries=500),
+    fallback_providers=[],
+    compare_providers=[],
+    providers=[],
 )
 
 class ConfigStore:
@@ -550,15 +584,15 @@ class ProviderEntry:
 | Clipboard kosong | Isi clipboard nol panjang | Tampilkan Popup_Window dengan Source_Text kosong dan status siap menerima masukan |
 
 ## Risks and Spikes
-
-Bagian ini mencatat risiko teknis yang harus diselesaikan sebelum atau selama implementasi.
-
-1. **Tangkapan area pada Wayland.** Portal Screenshot tidak menyediakan parameter area persegi. Desain memakai strategi tangkap layar penuh lalu potong secara lokal. Spike: pastikan `Screenshot` dengan `interactive=false` mengembalikan citra tanpa menampilkan antarmuka pemilihan pada GNOME Shell 50, dan pastikan cakupan citra meliputi seluruh monitor. Bila tidak, rencana cadangan adalah memakai portal `ScreenCast` dengan PipeWire untuk memperoleh satu bingkai.
-2. **Konversi koordinat pada penskalaan fraksional.** Overlay bekerja pada koordinat logis, sedangkan citra hasil tangkapan berada pada koordinat piksel. Spike: uji pada penskalaan 100%, 125%, dan 200% serta pada susunan dua monitor.
-3. **Pembacaan Clipboard tanpa fokus pada Wayland.** Uji apakah `GdkClipboard.read_text_async` berhasil ketika jendela Pinux tidak memegang fokus. Bila gagal, rencana cadangan adalah memakai portal `Clipboard` yang tersedia pada sistem target.
-4. **Pengikatan GlobalShortcuts portal.** Portal memerlukan interaksi pengguna untuk menyetujui pintasan dan pengikatan tidak bertahan antar sesi. Spike: pastikan Pinux menangani pengikatan ulang pada setiap startup tanpa mengganggu pengguna.
-5. **Ketersediaan `cp314` untuk tumpukan ONNX.** Wheel telah diverifikasi ada di PyPI, namun pemasangan aktual pada Python 3.14 belum diuji. Spike: pasang `rapidocr-onnxruntime` dan `onnxruntime` pada virtualenv dan jalankan satu pengenalan gambar.
-6. **Struktur paket pihak ketiga.** `StatusNotifierItem` dan `com.canonical.dbusmenu` diimplementasikan manual. Spike: verifikasi tampil pada GNOME Shell 50 dengan ekstensi `appindicatorsupport`.
+ 
+ Bagian ini mencatat risiko teknis dan penyelesaiannya yang telah divalidasi pada implementasi v1.0.0.
+ 
+ 1. **Tangkapan area pada Wayland [TERSELESAIKAN].** Portal Screenshot tidak menyediakan pemotongan interaktif tanpa dialog. Solusi: Pinux mengambil tangkapan layar penuh via Portal, lalu membekukannya (*frozen frame*) pada `RegionOverlay` layar penuh dengan efek dim cutout dan seleksi mouse lokal presisi piksel.
+ 2. **Konversi koordinat pada penskalaan fraksional [TERSELESAIKAN].** RegionOverlay memetakan koordinat logis GTK ke piksel riil citra menggunakan kalkulasi skala rasio monitor dan ukuran buffer `GdkTexture`, mencegah pergeseran area potong.
+ 3. **Pembacaan Clipboard tanpa fokus pada Wayland [TERSELESAIKAN].** Penangkapan teks asinkron non-blokir (`read_source_text_async`) memanfaatkan kombinasi `wl-paste` (saat Wayland membatasi fokus) dan fallback `GdkClipboard.read_text_async`, memastikan penangkapan teks konsisten tanpa deadlock thread UI.
+ 4. **Pengikatan GlobalShortcuts portal [TERSELESAIKAN].** Pinux mendukung pendaftaran via XDG GlobalShortcuts Portal serta menyediakan antarmuka CLI serbaguna (`pinux --trigger`, `pinux --pick-region`, `pinux --input`) untuk pengikatan pintasan keyboard di semua lingkungan desktop.
+ 5. **Penghentian Proses Non-blokir pada TTS [TERSELESAIKAN].** TtsEngine menggunakan background reaper thread dengan sinyal `SIGKILL` bertahap setelah batas waktu henti agar `stop()` tidak pernah menggantung thread antarmuka GTK.
+ 6. **Integritas Tray Icon dan Cache Kredensial [TERSELESAIKAN].** Tray Icon mengimplementasikan `org.kde.StatusNotifierItem` dan `com.canonical.dbusmenu` secara murni via D-Bus; kredensial Secret Service dilindungi in-memory cache dengan invalidasi otomatis via observer pattern `CredentialStore.connect_changed`.
 
 ## Test Strategy
 

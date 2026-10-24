@@ -129,8 +129,11 @@ class RequestScheduler:
                 # Jika urutan permintaan sudah berganti, abaikan
                 if seq != self._active_seq:
                     return False
-                # Jika token dibatalkan tetapi bukan karena timeout yang sedang dilaporkan
-                if token.cancelled and err.kind != "timeout" and err.kind != "cancelled":
+                # Sembunyikan error jenis "cancelled" dari UI agar UX tidak terganggu
+                if err.kind == "cancelled":
+                    return False
+                # Jika token dibatalkan bukan karena timeout, abaikan
+                if token.cancelled and err.kind != "timeout":
                     return False
             on_error(err)
             return False

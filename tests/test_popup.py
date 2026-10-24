@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gi
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gtk
 
 import pytest
@@ -177,6 +178,39 @@ def test_popup_window_actions() -> None:
     assert copied_text == "Hasil Terjemah"
 
 
+def test_popup_window_speak_and_stop_toggle() -> None:
+    """Verifikasi tombol TTS dapat memutar dan menghentikan suara (toggle)."""
+    spoken_texts: list[str] = []
+    stopped = False
+
+    def on_speak(text: str, lang: str | None) -> None:
+        spoken_texts.append(text)
+
+    def on_stop() -> None:
+        nonlocal stopped
+        stopped = True
+
+    popup = PopupWindow(
+        on_speak=on_speak,
+        on_stop_speak=on_stop,
+        tts_available=True,
+    )
+    popup.set_source_text("Sumber suara")
+    popup.show_result(TranslationResult("Hasil suara", "en", "dummy"))
+
+    # Klik pertama: mulai bicara
+    popup._speak_source_button.emit("clicked")
+    assert spoken_texts == ["Sumber suara"]
+    assert popup._is_speaking_source is True
+    assert popup._speak_source_button.get_icon_name() == "media-playback-stop-symbolic"
+
+    # Klik kedua: hentikan suara
+    popup._speak_source_button.emit("clicked")
+    assert stopped is True
+    assert popup._is_speaking_source is False
+    assert popup._speak_source_button.get_icon_name() == "audio-speakers-symbolic"
+
+
 def test_popup_window_language_selection() -> None:
     selected_source = None
     selected_target = None
@@ -344,5 +378,45 @@ def test_popup_renders_dictionary_and_phonetics() -> None:
     assert not popup._phonetic_label.get_visible()
     assert not popup._dict_box.get_visible()
     assert popup._dict_box.get_first_child() is None
+
+
+def test_popup_window_ui_panels_and_scroller() -> None:
+    """Verifikasi pemisahan panel source/result dan scroller hasil."""
+    popup = PopupWindow()
+    assert hasattr(popup, "_separator")
+    assert isinstance(popup._separator, Gtk.Separator)
+
+    assert hasattr(popup, "_result_scroller")
+    assert isinstance(popup._result_scroller, Gtk.ScrolledWindow)
+    assert popup._result_scroller.get_min_content_height() == 80
+    assert popup._result_scroller.get_max_content_height() == 600
+    assert popup._result_scroller.get_propagate_natural_height() is True
+
+    # P2: Tombol jendela penuh
+    assert hasattr(popup, "_expand_button")
+    assert isinstance(popup._expand_button, Gtk.Button)
+
+
+def test_popup_window_pin_button_visual_state() -> None:
+    """Verifikasi class CSS suggested-action aktif saat pinned=True."""
+    popup = PopupWindow(pin_default=False)
+    assert not popup._pin_button.has_css_class("suggested-action")
+
+    popup.pinned = True
+    assert popup._pin_button.has_css_class("suggested-action")
+
+    popup.pinned = False
+    assert not popup._pin_button.has_css_class("suggested-action")
+
+
+def test_translation_window_initialization() -> None:
+    """Verifikasi inisialisasi TranslationWindow (P2)."""
+    from pinux.ui.translation_window import TranslationWindow
+
+    win = TranslationWindow(source_text="Hello", result_text="Halo")
+    assert win.get_title() == "Pinux — Terjemahan"
+    assert win.get_resizable() is True
+    assert win.get_default_size() == (600, 600)
+
 
 

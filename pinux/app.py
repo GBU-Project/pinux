@@ -29,6 +29,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from pinux import APP_ID, __version__
+from pinux.capture.base import CaptureResult
 from pinux.capture.capturer import TextCapturer, clean_text
 from pinux.config import Settings
 from pinux.configstore import ConfigStore
@@ -69,23 +70,31 @@ class TriggerRouter:
 
     def request_translate(self) -> None:
         """Alur terjemahan teks penuh dari clipboard (R1.1, R2.1)."""
-        # 1. Baca teks dari clipboard
-        capture_res = self.app.text_capturer.read_source_text(
-            max_chars=self.app.settings.max_chars
-        )
-        source_text = capture_res.text
-
-        # 2. Tampilkan popup di dekat kursor
+        # Tampilkan popup duluan dalam status loading agar respon instan
         popup = self.app.get_popup_window()
-        popup.set_source_text(source_text)
+        popup.show_loading()
         popup.present_at_cursor(0, 0)
 
-        # 3. Jika teks tidak kosong, kirim ke RequestScheduler
-        if source_text.strip():
-            self._execute_translation(source_text)
+        def _on_captured(capture_res: CaptureResult) -> None:
+            source_text = capture_res.text
+            popup.set_source_text(source_text)
+
+            # Jika teks tidak kosong, kirim ke RequestScheduler
+            if source_text.strip():
+                self._execute_translation(source_text)
+            else:
+                popup.show_loading()
+                popup._spinner.set_visible(False)
+
+        capturer = self.app.text_capturer
+        if hasattr(capturer, "read_source_text_async"):
+            capturer.read_source_text_async(
+                _on_captured,
+                max_chars=self.app.settings.max_chars,
+            )
         else:
-            popup.show_loading()
-            popup._spinner.set_visible(False)
+            res = capturer.read_source_text(max_chars=self.app.settings.max_chars)
+            _on_captured(res)
 
     def request_input_translate(self) -> None:
         """Buka jendela popup kosong yang siap untuk input manual pengguna."""
@@ -639,6 +648,7 @@ class PinuxApp(Adw.Application):
         logger.info("Menghentikan Pinux...")
         self.shortcut_manager.stop()
         self.tray_item.hide()
+        self.scheduler.cancel_active()
         self.scheduler.shutdown(wait=False)
         self.ocr_client.shutdown()
         self.config_store.close()
@@ -655,6 +665,7 @@ class PinuxApp(Adw.Application):
         )
         if self._popup_window is not None:
             self._popup_window.pinned = new_settings.popup.pin_default
+            self._popup_window._close_on_blur = new_settings.popup.close_on_blur
 
     def get_popup_window(self) -> PopupWindow:
         """Dapatkan atau buat PopupWindow tunggal (R1.5)."""
@@ -668,10 +679,12 @@ class PinuxApp(Adw.Application):
                 on_trigger_ocr=lambda: self.trigger_router.request_ocr(),
                 on_ocr_file=lambda: self.trigger_router.request_ocr_file(),
                 on_speak=lambda text, lang: self.tts.speak(text, lang),
+                on_stop_speak=self.tts.stop,
                 on_toggle_favorite=self._toggle_favorite,
                 on_show_history=(self.show_history_window if self.history is not None else None),
                 tts_available=self.tts.available,
                 pin_default=self.settings.popup.pin_default,
+                close_on_blur=self.settings.popup.close_on_blur,
                 continuous_ocr_default=self.settings.ocr.continuous_ocr,
                 on_continuous_ocr_toggled=lambda val: self._on_continuous_ocr_toggled(val),
                 width=self.settings.popup.width,

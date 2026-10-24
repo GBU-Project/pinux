@@ -16,6 +16,7 @@ import os
 import stat
 import tempfile
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -108,6 +109,18 @@ class CredentialStore:
         )
         self._force_fallback = force_fallback
         self._warnings: list[str] = []
+        self._on_changed_callbacks: list[Callable[[str], None]] = []
+
+    def connect_changed(self, callback: Callable[[str], None]) -> None:
+        """Daftarkan callback saat kredensial provider disimpan atau dihapus."""
+        self._on_changed_callbacks.append(callback)
+
+    def _notify_changed(self, provider_id: str) -> None:
+        for cb in list(self._on_changed_callbacks):
+            try:
+                cb(provider_id)
+            except Exception:
+                pass
 
     @property
     def fallback_path(self) -> Path:
@@ -142,6 +155,7 @@ class CredentialStore:
             self._set_secret(provider_id, credential)
         else:
             self._set_fallback(provider_id, credential)
+        self._notify_changed(provider_id)
 
     def delete(self, provider_id: str) -> None:
         """Hapus kredensial untuk ``provider_id``."""
@@ -149,6 +163,7 @@ class CredentialStore:
             self._delete_secret(provider_id)
         else:
             self._delete_fallback(provider_id)
+        self._notify_changed(provider_id)
 
     # -- Implementasi Secret Service ---------------------------------------
 

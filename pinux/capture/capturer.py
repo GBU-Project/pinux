@@ -152,11 +152,19 @@ class ClipboardBackend(Protocol):
     """Abstraksi akses clipboard untuk memisahkan GDK dari pengujian."""
 
     def read_clipboard_text(self) -> str:
-        """Baca teks dari clipboard standar."""
+        """Baca teks dari clipboard standar (sinkron)."""
+        ...
+
+    def read_clipboard_text_async(self, callback: Callable[[str], None]) -> None:
+        """Baca teks dari clipboard secara asinkron (non-blocking)."""
         ...
 
     def read_primary_text(self) -> str:
-        """Baca teks dari primary selection (khusus X11)."""
+        """Baca teks dari primary selection (khusus X11) (sinkron)."""
+        ...
+
+    def read_primary_text_async(self, callback: Callable[[str], None]) -> None:
+        """Baca teks dari primary selection secara asinkron (non-blocking)."""
         ...
 
     def write_clipboard_text(self, text: str) -> None:
@@ -189,27 +197,74 @@ class GdkClipboardBackend:
         self._primary = display.get_primary_clipboard()
 
     def read_clipboard_text(self) -> str:
-        return self._read_text(self._clipboard)
+        return self._read_text_sync(self._clipboard)
 
     def read_primary_text(self) -> str:
-        # Pada Wayland, klien tanpa fokus tidak menerima isi seleksi primer
-        # dari GDK; ``wl-paste`` (wl-clipboard) menanganinya bila terpasang.
         if detect_desktop_session() == "wayland":
             text = _run_clipboard_tool(["wl-paste", "--primary", "--no-newline"])
             if text:
                 return text
-        return self._read_text(self._primary)
+        return self._read_text_sync(self._primary)
+
+    def read_clipboard_text_async(self, callback: Callable[[str], None]) -> None:
+        if self._clipboard is None:
+            import gi
+            from gi.repository import GLib
+            GLib.idle_add(callback, "")
+            return
+        self._read_text_async(self._clipboard, callback)
+
+    def read_primary_text_async(self, callback: Callable[[str], None]) -> None:
+        import gi
+        from gi.repository import GLib
+
+        if detect_desktop_session() == "wayland":
+            # Jalankan wl-paste di background thread agar tidak memblokir UI GTK
+            import threading
+
+            def _worker() -> None:
+                txt = _run_clipboard_tool(["wl-paste", "--primary", "--no-newline"])
+                if txt:
+                    GLib.idle_add(callback, txt)
+                else:
+                    if self._primary is not None:
+                        GLib.idle_add(self._read_text_async, self._primary, callback)
+                    else:
+                        GLib.idle_add(callback, "")
+
+            threading.Thread(target=_worker, daemon=True).start()
+            return
+
+        if self._primary is None:
+            GLib.idle_add(callback, "")
+            return
+        self._read_text_async(self._primary, callback)
+
+    def _read_text_async(self, clipboard: object, callback: Callable[[str], None]) -> None:
+        if clipboard is None:
+            import gi
+            from gi.repository import GLib
+            GLib.idle_add(callback, "")
+            return
+
+        import gi
+        from gi.repository import GLib
+
+        def _on_ready(source: object, result: object) -> None:
+            try:
+                text = source.read_text_finish(result) or ""
+            except Exception:
+                text = ""
+            GLib.idle_add(callback, text)
+
+        clipboard.read_text_async(None, _on_ready)
 
     @staticmethod
-    def _read_text(clipboard: object, timeout_ms: int = 1000) -> str:
-        """Baca teks dari ``Gdk.Clipboard`` secara sinkron.
-
-        GDK4 hanya menyediakan ``read_text_async``. Konteks utama GLib diputar
-        sementara hingga hasil tiba atau ``timeout_ms`` habis, sehingga harus
-        dipanggil dari thread utama.
-        """
+    def _read_text_sync(clipboard: object, timeout_ms: int = 1000) -> str:
+        """Baca teks dari ``Gdk.Clipboard`` secara sinkron (fallback/pengujian)."""
         if clipboard is None:
             return ""
+        import gi
         from gi.repository import GLib
 
         context = GLib.MainContext.default()
@@ -229,6 +284,9 @@ class GdkClipboardBackend:
             if not state["done"]:
                 GLib.usleep(2000)
         return str(state["text"])
+
+    # Alias untuk kompatibilitas ke belakang
+    _read_text = _read_text_sync
 
     def write_clipboard_text(self, text: str) -> None:
         if self._clipboard is not None:
@@ -282,18 +340,78 @@ class TextCapturer:
         self._changed_at[source] = time.monotonic()
         if not self._callbacks:
             return  # hindari membaca clipboard bila tak ada pelanggan
-        self._on_clipboard_changed()
+        self.read_source_text_async(self._on_clipboard_changed_cb)
 
-    def _on_clipboard_changed(self) -> None:
-        res = self.read_source_text()
+    def _on_clipboard_changed_cb(self, res: CaptureResult) -> None:
         for cb in list(self._callbacks):
             try:
                 cb(res)
             except Exception:
                 pass
 
+    def _on_clipboard_changed(self) -> None:
+        res = self.read_source_text()
+        self._on_clipboard_changed_cb(res)
+
+    def read_source_text_async(
+        self, callback: Callable[[CaptureResult], None], *, max_chars: int = 5000
+    ) -> None:
+        """Baca teks sumber secara asinkron (non-blocking)."""
+        import gi
+        from gi.repository import GLib
+
+        if self._backend is None:
+            GLib.idle_add(callback, CaptureResult(text="", truncated=False, origin="clipboard"))
+            return
+
+        # Cek apakah backend mendukung async
+        if hasattr(self._backend, "read_clipboard_text_async") and hasattr(
+            self._backend, "read_primary_text_async"
+        ):
+            state = {"clipboard": None, "primary": None}
+
+            def _process_results() -> None:
+                clipboard_text = state["clipboard"] or ""
+                primary_text = state["primary"] or ""
+
+                use_primary = (
+                    bool(primary_text)
+                    and primary_text != clipboard_text
+                    and self._session_type == "x11"
+                )
+                if use_primary and self._changed_at["clipboard"] > self._changed_at["primary"]:
+                    use_primary = False
+
+                if use_primary:
+                    final_text, truncated = truncate_text(primary_text, max_chars)
+                    res = CaptureResult(text=final_text, truncated=truncated, origin="primary")
+                else:
+                    final_text, truncated = truncate_text(clipboard_text, max_chars)
+                    res = CaptureResult(text=final_text, truncated=truncated, origin="clipboard")
+
+                callback(res)
+
+            def _check_done() -> None:
+                if state["clipboard"] is not None and state["primary"] is not None:
+                    _process_results()
+
+            def _on_clipboard_done(text: str) -> None:
+                state["clipboard"] = text
+                _check_done()
+
+            def _on_primary_done(text: str) -> None:
+                state["primary"] = text
+                _check_done()
+
+            self._backend.read_clipboard_text_async(_on_clipboard_done)
+            self._backend.read_primary_text_async(_on_primary_done)
+        else:
+            # Fallback jika backend mock lama tidak memiliki method async
+            res = self.read_source_text(max_chars=max_chars)
+            GLib.idle_add(callback, res)
+
     def read_source_text(self, *, max_chars: int = 5000) -> CaptureResult:
-        """Baca teks sumber aktif menurut Desktop_Session dan potong ke max_chars."""
+        """Baca teks sumber aktif secara sinkron (fallback untuk pengujian/thread lain)."""
         if self._backend is None:
             return CaptureResult(text="", truncated=False, origin="clipboard")
 
