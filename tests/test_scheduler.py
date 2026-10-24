@@ -62,7 +62,7 @@ class MockSlowProvider:
         return TranslationResult(f"Hasil: {request.text}", "en", self.id)
 
 
-def run_glib_loop(timeout_s: float = 0.5, condition: Callable[[], bool] | None = None) -> None:
+def run_glib_loop(timeout_s: float = 2.0, condition: Callable[[], bool] | None = None) -> None:
     """Jalankan iterasi main loop GLib sebentar untuk mengalirkan callback idle_add."""
     ctx = GLib.MainContext.default()
     start = time.monotonic()
