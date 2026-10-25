@@ -156,6 +156,20 @@ class RegionOverlay(Gtk.Window):
         key_controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(key_controller)
 
+    def _detach_drawing_area(self) -> None:
+        """Lepaskan DrawingArea dari induknya (jendela atau overlay lama) sebelum dipasang ulang.
+
+        GTK menolak memasang widget yang masih punya induk ("Can't set new parent ...");
+        tanpa ini lapisan dim/seleksi hilang pada setiap tangkapan ke-1, ke-3, dst.
+        """
+        parent = self._drawing_area.get_parent()
+        if parent is None:
+            return
+        if parent is self:
+            self.set_child(None)
+        elif isinstance(parent, Gtk.Overlay):
+            parent.remove_overlay(self._drawing_area)
+
     def open(
         self,
         on_selected: Callable[[Rect], None],
@@ -172,7 +186,7 @@ class RegionOverlay(Gtk.Window):
         menerima ``Rect`` koordinat jendela.
 
         Dengan ``screenshot_provider``: tangkapan layar diambil dahulu di thread
-        latar (setafter ``capture_delay_s`` agar jendela lain sempat hilang),
+        latar (setelah ``capture_delay_s`` agar jendela lain sempat hilang),
         ditampilkan layar penuh sebagai latar, dan ``on_image`` menerima PNG
         hasil potongan yang sudah dalam piksel citra.
         """
@@ -184,6 +198,7 @@ class RegionOverlay(Gtk.Window):
 
         if screenshot_provider is None:
             self._shot_png = None
+            self._detach_drawing_area()  # bisa masih menempel pada overlay tangkapan sebelumnya
             self.set_child(self._drawing_area)
             self.maximize()
             self.present()
@@ -237,6 +252,7 @@ class RegionOverlay(Gtk.Window):
         # Letakkan DrawingArea di atas Picture agar efek dim cutout tetap aktif
         root = Gtk.Overlay()
         root.set_child(picture)
+        self._detach_drawing_area()
         root.add_overlay(self._drawing_area)
         root.add_overlay(fixed)
         self._picture, self._selection_box, self._shot_root = picture, box, root
