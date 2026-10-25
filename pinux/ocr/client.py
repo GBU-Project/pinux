@@ -56,6 +56,10 @@ class OcrWorkerClient:
         self._worker_cmd = worker_cmd or [sys.executable, "-m", "pinux.ocr.worker"]
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        # Satu permintaan ke pekerja pada satu waktu: protokol memakai satu pipa stdout,
+        # sehingga dua pembaca bersamaan saling membuang pesan dan keduanya habis waktu.
+        # Urutan kunci selalu _request_lock -> _lock; jalur henti hanya memakai _lock.
+        self._request_lock = threading.Lock()
         self._reader_thread: threading.Thread | None = None
         self._next_id = 1
         self._last_active_time = time.monotonic()
@@ -146,8 +150,21 @@ class OcrWorkerClient:
                 pass
             self._reader_thread = None
 
+    def _acquire_request(self, cancel: CancelToken | None = None) -> None:
+        """Ambil ``_request_lock``; menunggu giliran tetap dapat dibatalkan."""
+        while not self._request_lock.acquire(timeout=0.05):
+            if cancel is not None and cancel.cancelled:
+                raise RuntimeError("Permintaan OCR dibatalkan")
+
     def ensure_model(self, on_progress: Callable[[float], None] | None = None) -> None:
         """Kirim permintaan ensure_model ke pekerja OCR."""
+        self._acquire_request()
+        try:
+            self._ensure_model_locked(on_progress)
+        finally:
+            self._request_lock.release()
+
+    def _ensure_model_locked(self, on_progress: Callable[[float], None] | None) -> None:
         with self._lock:
             self._last_active_time = time.monotonic()
             proc = self._ensure_proc()
@@ -195,6 +212,15 @@ class OcrWorkerClient:
         if cancel is not None and cancel.cancelled:
             raise RuntimeError("Permintaan OCR dibatalkan")
 
+        self._acquire_request(cancel)
+        try:
+            return self._recognize_locked(image_png, cancel, timeout_s)
+        finally:
+            self._request_lock.release()
+
+    def _recognize_locked(
+        self, image_png: bytes, cancel: CancelToken | None, timeout_s: float
+    ) -> OcrResult:
         # 1. Inisialisasi proses & kirim permintaan (di bawah kunci, cepat)
         with self._lock:
             self._last_active_time = time.monotonic()
@@ -241,11 +267,13 @@ class OcrWorkerClient:
             except Exception as exc:
                 error_container.append(exc)
 
-        self._reader_thread = threading.Thread(target=_read_loop, daemon=True)
-        self._reader_thread.start()
+        # Variabel lokal: _kill_proc_locked() dari thread lain (shutdown) mengosongkan atribut.
+        reader = threading.Thread(target=_read_loop, daemon=True)
+        self._reader_thread = reader
+        reader.start()
 
         deadline = time.monotonic() + timeout_s
-        while self._reader_thread.is_alive():
+        while reader.is_alive():
             if cancel is not None and cancel.cancelled:
                 with self._lock:
                     self._kill_proc_locked()
@@ -254,7 +282,7 @@ class OcrWorkerClient:
                 with self._lock:
                     self._kill_proc_locked()
                 raise RuntimeError(f"OCR melebihi batas waktu {timeout_s:.0f} detik")
-            self._reader_thread.join(timeout=0.05)
+            reader.join(timeout=0.05)
 
         if error_container:
             with self._lock:
