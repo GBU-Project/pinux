@@ -14,6 +14,7 @@ Perujuk: R2.1, R2.2, R2.3, R2.5, R5.4 pada requirements.md, serta design.md.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -22,6 +23,11 @@ from collections.abc import Callable
 from typing import Final, Literal, Protocol, runtime_checkable
 
 from pinux.capture.base import CaptureOrigin, CaptureResult
+
+logger = logging.getLogger("pinux.capture.capturer")
+
+#: Batas waktu pembacaan clipboard asinkron; sama dengan versi sinkron (``_read_text_sync``).
+ASYNC_READ_TIMEOUT_MS: Final[int] = 1000
 
 __all__ = [
     "ClipboardBackend",
@@ -240,24 +246,65 @@ class GdkClipboardBackend:
             return
         self._read_text_async(self._primary, callback)
 
-    def _read_text_async(self, clipboard: object, callback: Callable[[str], None]) -> None:
+    def _read_text_async(
+        self,
+        clipboard: object,
+        callback: Callable[[str], None],
+        timeout_ms: int | None = None,
+    ) -> None:
+        """Baca teks ``Gdk.Clipboard`` tanpa memblokir; ``callback`` dipanggil tepat sekali.
+
+        ``read_text_async`` tidak punya batas waktu: pemilik clipboard yang tidak
+        merespons membuat popup tertahan di status memuat. Bila belum ada hasil dalam
+        ``timeout_ms``, pembacaan dibatalkan dan ``callback`` menerima string kosong
+        (sama seperti batas 1000 ms pada versi sinkron). ``callback`` berjalan pada
+        thread utama.
+        """
+        from gi.repository import Gio, GLib
+
+        if timeout_ms is None:
+            timeout_ms = ASYNC_READ_TIMEOUT_MS
+
+        def _deliver(text: str) -> None:
+            def _run() -> bool:
+                callback(text)
+                return False  # sekali jalan; jangan ulangi bila callback mengembalikan nilai benar
+
+            GLib.idle_add(_run)
+
         if clipboard is None:
-            import gi
-            from gi.repository import GLib
-            GLib.idle_add(callback, "")
+            _deliver("")
             return
 
-        import gi
-        from gi.repository import GLib
+        cancellable = Gio.Cancellable()
+        state = {"done": False, "timeout_id": 0}
+
+        def _finish(text: str) -> None:
+            if state["done"]:
+                return  # hasil terlambat setelah batas waktu (atau sebaliknya) diabaikan
+            state["done"] = True
+            if state["timeout_id"]:
+                GLib.source_remove(state["timeout_id"])
+                state["timeout_id"] = 0
+            _deliver(text)
+
+        def _on_timeout() -> bool:
+            state["timeout_id"] = 0  # sumber ini hilang sendiri saat mengembalikan False
+            if not state["done"]:
+                logger.info("Pembacaan clipboard melebihi %d ms; dibatalkan.", timeout_ms)
+                cancellable.cancel()
+                _finish("")
+            return False
 
         def _on_ready(source: object, result: object) -> None:
             try:
                 text = source.read_text_finish(result) or ""
             except Exception:
                 text = ""
-            GLib.idle_add(callback, text)
+            _finish(text)
 
-        clipboard.read_text_async(None, _on_ready)
+        state["timeout_id"] = GLib.timeout_add(timeout_ms, _on_timeout)
+        clipboard.read_text_async(cancellable, _on_ready)
 
     @staticmethod
     def _read_text_sync(clipboard: object, timeout_ms: int = 1000) -> str:
