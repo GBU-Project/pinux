@@ -183,20 +183,82 @@ def test_stop_cancels_pending_bind_and_closes_orphan_session() -> None:
     assert portal.close_calls == closes_after_stop + 1, "sesi yatim ditutup"
 
 
-def test_restart_after_stop_is_not_closed_by_old_worker() -> None:
-    first = GatedPortal()
-    manager, _states = _manager(first)
+class SequencedPortal(GatedPortal):
+    """Portal dengan gerbang terpisah untuk tiap panggilan bind(): urutan selesai ditentukan tes."""
+
+    def __init__(self, calls: int = 2, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.gates = [threading.Event() for _ in range(calls)]
+        self.entered_n = [threading.Event() for _ in range(calls)]
+        self._n = 0
+        self._n_lock = threading.Lock()
+
+    def bind(self, specs, parent_window: str = ""):
+        with self._n_lock:
+            n = self._n
+            self._n += 1
+        self.bind_calls += 1
+        self.entered_n[n].set()
+        assert self.gates[n].wait(5), f"tes tidak melepaskan gerbang {n}"
+        return list(self.bound)
+
+
+def _restart_during_pending_bind(portal: SequencedPortal):
+    """Bind #1 tertahan, stop(), lalu start_async() kedua: dua pekerja hidup bersamaan."""
+    manager, _states = _manager(portal)
     manager.start_async()
-    first.entered.wait(2)
+    assert portal.entered_n[0].wait(2)
     manager.stop()
-
     done: list[str] = []
-    assert manager.start_async(done.append) is True  # pengikatan baru berjalan
-    closes = first.close_calls
-    first.gate.set()
-    assert _pump_until(lambda: done)
+    assert manager.start_async(done.append) is True
+    assert portal.entered_n[1].wait(2)
+    return manager, done
 
-    assert first.close_calls == closes, "pekerja lama tidak boleh menutup sesi milik pengikatan baru"
+
+def test_stale_worker_finishing_first_does_not_close_newer_bind() -> None:
+    portal = SequencedPortal()
+    manager, done = _restart_during_pending_bind(portal)
+    closes = portal.close_calls
+
+    portal.gates[0].set()  # pekerja lama selesai lebih dulu, pengikatan baru masih berjalan
+    _pump(150)
+    assert portal.close_calls == closes, "pekerja lama tidak boleh menutup sesi milik pengikatan baru"
+    assert done == []
+
+    portal.gates[1].set()
+    assert _pump_until(lambda: done)
+    assert done == ["portal"] and manager.active_backend == "portal"
+    assert portal.close_calls == closes
+
+
+def test_stale_worker_finishing_after_newer_bind_succeeded_keeps_session() -> None:
+    portal = SequencedPortal()
+    manager, done = _restart_during_pending_bind(portal)
+
+    portal.gates[1].set()  # pengikatan baru selesai lebih dulu dan berhasil
+    assert _pump_until(lambda: done)
+    assert manager.active_backend == "portal"
+    closes = portal.close_calls
+
+    portal.gates[0].set()  # pekerja lama baru selesai: hasilnya hanya dibuang
+    _pump(300)
+
+    assert portal.close_calls == closes, "sesi yang baru berhasil diikat tidak boleh ditutup pekerja lama"
+    assert manager.active_backend == "portal" and len(manager.bound_shortcuts) == 2
+
+
+def test_stale_worker_after_newer_bind_failed_still_cleans_up_quietly() -> None:
+    portal = SequencedPortal(bound=[])
+    manager, done = _restart_during_pending_bind(portal)
+
+    portal.gates[1].set()
+    assert _pump_until(lambda: done)
+    assert done == ["cli"]
+
+    portal.gates[0].set()
+    _pump(200)
+
+    assert manager.active_backend == "cli"  # tidak melempar dan keadaan tetap konsisten
 
 
 def test_start_async_without_portal_completes_immediately() -> None:

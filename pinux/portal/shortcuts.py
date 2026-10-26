@@ -718,9 +718,11 @@ class ShortcutManager:
 
         def _finish(outcome: tuple[list[BoundShortcut] | None, Exception | None]) -> bool:
             if self._async_token is not token:
-                # stop() membatalkan permintaan ini: buang hasilnya dan tutup sesi yatim,
-                # kecuali pengikatan baru sudah berjalan (sesi itu bukan yatim lagi).
-                if self._async_token is None:
+                # stop() membatalkan permintaan ini: buang hasilnya. Sesi yatim ditutup hanya
+                # bila tidak ada pengikatan baru yang berjalan DAN manajer tidak memegang sesi
+                # aktif: _async_token juga None setelah pengikatan baru selesai, dan sesi
+                # milik pengikatan itu tidak boleh ditutup oleh pekerja lama yang terlambat.
+                if self._async_token is None and self._active_backend != "portal":
                     self._close_portal_quietly()
                 return False
             self._async_token = None
