@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinux"
-version = "1.0.0"
+version = "1.1.0"
 description = "Aplikasi penerjemah desktop GTK4 untuk Linux dengan popup dan OCR tangkapan layar"
 
 readme = "README.md"

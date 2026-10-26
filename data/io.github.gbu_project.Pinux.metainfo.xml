@@ -29,6 +29,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.1.0" date="2026-10-26">
+      <description>
+        <p>Rilis perbaikan dan penguatan: halaman Pintasan memperbarui diri dan dapat mengikat ulang pintasan global tanpa memulai ulang, pengikatan portal tidak lagi memblokir antarmuka, serta perbaikan OCR bersamaan, lapisan seleksi area, pembacaan clipboard yang macet, dan pembatalan suara TTS.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-10-24">
       <description>
         <p>Rilis stabil v1.0.0: peningkatan arsitektur provider &amp; cache kredensial, proteksi TTS non-blokir, integrasi visual overlay cutout, perbaikan Wayland clipboard, dan dukungan penuh opsi close-on-blur.</p>
