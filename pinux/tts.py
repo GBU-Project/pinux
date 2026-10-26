@@ -17,6 +17,9 @@ __all__ = ["BACKENDS", "TtsEngine", "build_command"]
 
 logger = logging.getLogger(__name__)
 
+#: Batas tunggu ``spd-say -C`` sebelum teks ucapan baru tetap dikirim (detik).
+CANCEL_WAIT_S: Final[float] = 1.5
+
 #: Urutan preferensi: (nama perintah, template argumen; ``{lang}`` diganti kode bahasa).
 BACKENDS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("spd-say", ("-e", "-w", "-l", "{lang}")),
@@ -51,6 +54,8 @@ class TtsEngine:
         self._max_chars = max_chars
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[bytes] | None = None
+        # Pembatalan spd-say (-C) yang masih berjalan; ucapan baru menunggunya (lihat speak).
+        self._pending_cancels: list[threading.Event] = []
         self._backend: tuple[str, tuple[str, ...]] | None = None
         self._binary: str | None = None
         for name, template in BACKENDS:
@@ -94,16 +99,39 @@ class TtsEngine:
                 logger.warning("TTS gagal dijalankan (%s): %s", name, exc)
                 return False
             self._proc = proc
+            # Pembatalan yang dimulai oleh _stop_locked() di atas (dan yang lebih lama).
+            waits = [e for e in self._pending_cancels if not e.is_set()]
+            self._pending_cancels = waits
         if len(text) > self._max_chars:
             logger.info("Teks TTS dipotong ke %d karakter (dari %d)", self._max_chars, len(text))
+        data = text[: self._max_chars].encode("utf-8")
+        if waits:
+            # spd-say baru mengirim pesan ke daemon setelah membaca stdin, jadi menunda
+            # penulisan teks menjamin ``spd-say -C`` milik ucapan lama tiba lebih dulu dan
+            # tidak membatalkan ucapan baru, tanpa memblokir thread pemanggil.
+            threading.Thread(
+                target=self._feed_after, args=(proc, data, waits), daemon=True
+            ).start()
+        else:
+            self._feed(proc, data)
+        return True
+
+    @staticmethod
+    def _feed(proc: subprocess.Popen[bytes], data: bytes) -> None:
         try:
             assert proc.stdin is not None
-            proc.stdin.write(text[: self._max_chars].encode("utf-8"))
+            proc.stdin.write(data)
             proc.stdin.close()
         except (BrokenPipeError, OSError, ValueError):
             # Proses berhenti sebelum membaca (mis. dihentikan oleh speak berikutnya).
             pass
-        return True
+
+    def _feed_after(
+        self, proc: subprocess.Popen[bytes], data: bytes, waits: Sequence[threading.Event]
+    ) -> None:
+        for done in waits:
+            done.wait(CANCEL_WAIT_S)
+        self._feed(proc, data)
 
     def stop(self) -> None:
         """Hentikan ucapan yang sedang berjalan."""
@@ -139,6 +167,9 @@ class TtsEngine:
             # Pada backend spd-say, proses klien spd-say hanya mengirim pesan ke daemon speech-dispatcher.
             # Untuk menghentikan suara audio yang sedang dimainkan oleh daemon:
             if self._backend is not None and self._backend[0] == "spd-say":
+                cancel_done = threading.Event()
+                self._pending_cancels.append(cancel_done)
+
                 def _cancel_spd() -> None:
                     try:
                         subprocess.run(
@@ -150,6 +181,8 @@ class TtsEngine:
                         )
                     except Exception:
                         pass
+                    finally:
+                        cancel_done.set()
 
                 threading.Thread(target=_cancel_spd, daemon=True).start()
 
