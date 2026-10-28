@@ -30,6 +30,7 @@ Penyiapan lingkungan, alur kerja pengujian, konvensi kode, dan panduan langkah d
 | `pinux/ocr/` | Model data dan kontrak mesin OCR, terpisah dari dependensi beratnya | [README](./modules/ocr.md) |
 | `pinux/capture/` | Model hasil penangkapan Source_Text | [README](./modules/capture.md) |
 | `pinux/config.py` | Model pengaturan beserta nilai bawaan | [README](./modules/config.md) |
+| `pinux/history.py` | Riwayat dan favorit terjemahan (SQLite lokal) | [README](./modules/history.md) |
 | `pinux/scheduler.py` | Token pembatalan permintaan yang aman lintas thread | [README](./modules/scheduler.md) |
 | `pinux/portal/` | Klien portal D-Bus, direncanakan pada task 11 dan 12 | [README](./modules/portal.md) |
 | `pinux/ui/` | Antarmuka GTK4/libadwaita, direncanakan pada task 15 sampai 18 | [README](./modules/ui.md) |

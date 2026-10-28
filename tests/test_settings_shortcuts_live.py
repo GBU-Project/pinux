@@ -10,6 +10,8 @@ Memerlukan display (nyata atau Xvfb), seperti ``test_settings_ui.py``.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -302,6 +304,64 @@ def test_page_shows_waiting_state_while_bind_is_blocked(tmp_path: Path) -> None:
         assert description.startswith("Menunggu")
         assert _group(win).get_title() == PORTAL_TITLE, "setelah bind selesai halaman menampilkan portal"
     finally:
+        win.destroy()
+
+
+class BlockingPortal(FakePortal):
+    """Portal yang ``bind``-nya menahan diri sampai tes melepasnya.
+
+    Berbeda dari :class:`PumpingPortal` (yang memutar main loop di dalam ``bind``
+    pada thread utama, sah hanya untuk jalur sinkron ``start()``), ``bind`` di sini
+    berjalan pada worker thread milik ``start_async()``. Karena itu ia tidak boleh
+    menyentuh GTK sama sekali: ia hanya memberi sinyal "sudah masuk" dan menunggu
+    pelepasan.
+    """
+
+    def __init__(self, bound=None, available: bool = True) -> None:
+        super().__init__(bound, available)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def bind(self, specs, parent_window: str = ""):
+        self.entered.set()
+        self.release.wait(5)
+        return super().bind(specs, parent_window)
+
+
+def test_pending_state_is_shown_while_bind_runs_async(tmp_path: Path) -> None:
+    """Jalur yang dipakai produksi: ``start_async()`` dengan portal yang menunggu.
+
+    ``PumpingPortal`` menguji jalur sinkron ``start()``; tes ini menutup celah
+    jalur asinkron yang sebenarnya dipakai ``PinuxApp`` dan ``SettingsWindow``.
+    """
+    portal = BlockingPortal(_bound(("translate", "Ctrl+Alt+T"), ("ocr", "Ctrl+Alt+O")))
+    manager = ShortcutManager(portal=portal, specs=SPECS)
+    win = _make_window(tmp_path, manager)
+    done: list[str] = []
+    try:
+        assert manager.start_async(done.append) is True
+        assert portal.entered.wait(2), "bind harus berjalan di pekerja latar"
+
+        # start_async() tidak menunggu: callback belum dipanggil, UI sudah "menunggu".
+        assert done == []
+        _pump()
+        # Judul status menunggu tidak berawalan "Pintasan Keyboard", jadi _group()
+        # belum bisa dipakai di sini (lihat juga test_page_shows_waiting_state_while_bind_is_blocked).
+        assert win._shortcuts_group.get_title() == "Menunggu Persetujuan Desktop…"
+        assert manager.active_backend != "portal"
+        assert manager.last_reason == sc.REASON_PENDING
+
+        portal.release.set()
+        deadline = time.monotonic() + 3
+        while not done and time.monotonic() < deadline:
+            _pump(50)
+
+        assert done == ["portal"], "on_done dipanggil sekali dengan hasil akhir"
+        assert manager.active_backend == "portal"
+        assert manager.last_reason is None
+        assert _group(win).get_title() == PORTAL_TITLE
+    finally:
+        portal.release.set()
         win.destroy()
 
 

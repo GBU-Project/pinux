@@ -1,31 +1,33 @@
 # pinux/translate/
 
-> **Status**: model dan kontrak sudah ada; implementasi provider dan registri masih direncanakan.
+> **Status**: sudah diimplementasikan — model, kontrak, registri, dan seluruh provider bawaan.
 
-Paket ini memuat kontrak mesin penerjemahan beserta model datanya.
+Paket ini memuat kontrak mesin penerjemahan, model datanya, dan provider bawaan.
 
 ## Struktur
 
 ```
 pinux/translate/
 ├── __init__.py               # Docstring paket
-└── base.py                   # Model data dan Protocol TranslationProvider
-```
-
-Berkas berikut masih direncanakan:
-
-```
-pinux/translate/
-├── google_free.py            # Free_Provider google-free, task 6
-├── registry.py               # ProviderRegistry, task 7
-└── deepl.py                  # Pola Keyed_Provider, task 7
+├── base.py                   # Model data + Protocol TranslationProvider
+├── _http.py                  # Pembantu POST JSON bersama (validasi endpoint, pemetaan galat)
+├── google_free.py            # Free_Provider google-free
+├── deepl.py                  # Keyed_Provider DeepL
+├── libretranslate.py         # Provider LibreTranslate (instans lokal/host sendiri)
+├── openai_compatible.py      # Provider LLM bergaya OpenAI (termasuk server lokal)
+├── chain.py                  # FallbackChain: coba provider berurutan
+├── compare.py                # CompareProvider: jalankan beberapa provider sekaligus
+└── registry.py               # ProviderRegistry + pemuatan provider pihak ketiga
 ```
 
 ## Berkas Kunci
 
 | Berkas | Kegunaan |
 |---|---|
-| `base.py` | `Language`, `TranslationRequest`, `TranslationResult`, `TranslationError`, `ERROR_KINDS`, Protocol `TranslationProvider` |
+| `base.py` | `Language`, `TranslationRequest`, `TranslationResult`, `TranslationError`, `ERROR_KINDS`, `AlternativeResult`, `DictionaryEntry`, Protocol `TranslationProvider` |
+| `_http.py` | `post_json`, `validate_endpoint`, `is_local_url`, `http_status_to_kind` — dipakai DeepL dan LibreTranslate |
+| `chain.py` | `FallbackChain` — mencoba provider utama lalu cadangan; dipanggil langsung oleh `RequestScheduler` tanpa perubahan kontrak |
+| `registry.py` | `ProviderRegistry`, `ProviderInfo`, `load_provider_from_string` untuk provider pihak ketiga (`package.module:ClassName`) |
 
 ## Dependensi
 
@@ -35,9 +37,8 @@ pinux/translate/
 
 **Bergantung pada paket ini:**
 
-- `pinux.translate.registry` (direncanakan) - memuat dan memilih provider
-- `pinux.ui.settings` (direncanakan) - menampilkan daftar provider
-- `pinux.scheduler.RequestScheduler` (direncanakan) - memanggil `translate`
+- `pinux.ui.settings` - menampilkan daftar provider
+- `pinux.scheduler.RequestScheduler` - memanggil `translate`
 
 Paket ini tidak boleh mengimpor modul GTK.
 

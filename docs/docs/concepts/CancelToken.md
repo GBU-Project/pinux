@@ -68,6 +68,30 @@ if cancel.cancelled:
 3. **Monotonisitas.** Setelah bernilai `True`, `cancelled` tidak pernah kembali `False`.
 4. **Keamanan thread.** Pembacaan dan penulisan dari thread berbeda tidak menimbulkan balapan data.
 
+## Batasan: pembatalan hanya kooperatif
+
+`CancelToken` **tidak pernah memutus I/O yang sedang berjalan**. `cancel()` hanya
+menyalakan `threading.Event`; jalur yang menjalankan pekerjaan wajib memeriksanya
+sendiri. Karena itu latensi pembatalan bergantung pada titik pemeriksaan di tiap jalur:
+
+| Jalur | Perilaku saat `cancel()` |
+|---|---|
+| `OcrWorkerClient` (`pinux/ocr/client.py`) | Memantau tiap 50 ms dan mematikan subprocess pekerja — I/O benar-benar berhenti |
+| `RapidOcrEngine` (`pinux/ocr/rapid.py`) | Diperiksa di antara tahap; model lokal berjalan sampai tahap berjalan selesai |
+| `_http.post_json` (DeepL, LibreTranslate) | Diperiksa sebelum dan sesudah `urlopen`; `read()` yang sedang berjalan tidak diputus |
+| `OpenAiCompatibleProvider` | Diperiksa setelah header diterima, sebelum `read()`; bodi respons tidak diputus |
+| `GoogleFreeProvider` | Diperiksa sebelum `read()`; bodi respons tidak diputus |
+| `FallbackChain` / `CompareProvider` | Diperiksa di antara provider |
+
+Konsekuensi: untuk provider HTTP, latensi pembatalan maksimum kira-kira sebesar
+`timeout_s` provider (bawaan `post_json` 15 detik), bukan seketika.
+
+Keterlambatan itu tetap tidak merusak UX karena `RequestScheduler` membuang hasil
+permintaan yang sudah usang: `_dispatch_result` hanya memanggil `on_result` bila
+`seq` masih aktif dan token belum dibatalkan, sedangkan `_dispatch_error`
+menyembunyikan galat berjenis `cancelled`. Jadi pembatalan yang "kalah cepat"
+hanya membuang hasil, tidak menimpa terjemahan terbaru.
+
 ## Hubungan dengan Konsep Lain
 
 | Konsep | Hubungan |
